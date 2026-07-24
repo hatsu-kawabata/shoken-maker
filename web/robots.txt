@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://shoken-maker.vercel.app/pages/eki/sitemap.txt

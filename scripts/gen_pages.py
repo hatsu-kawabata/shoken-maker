@@ -66,7 +66,11 @@ def aggregate(clat: float, clon: float, r: float) -> dict:
     nv = 5 + 2 * N_BANDS
     s = [0.0] * nv
     age_num = age_den = 0.0
+    lat_lo, lat_hi = clat - dlat_r, clat + dlat_r
+    lon_lo, lon_hi = clon - dlon_r, clon + dlon_r
     for la, lo, v in cells:
+        if not (lat_lo <= la <= lat_hi and lon_lo <= lo <= lon_hi):
+            continue
         inside = 0
         for sy in (-DLAT / 4, DLAT / 4):
             for sx in (-DLON / 4, DLON / 4):
@@ -204,7 +208,8 @@ def main() -> None:
 
     OUT.mkdir(parents=True, exist_ok=True)
     urls = []
-    for s in targets:
+    index_items = []
+    for i, s in enumerate(targets):
         slug = slugs[idx[id(s)]]
         aggs = {r: aggregate(s["la"], s["lo"], r) for r in RADII}
         if aggs[1000]["pop"] == 0:
@@ -220,8 +225,32 @@ def main() -> None:
         d.mkdir(parents=True, exist_ok=True)
         (d / "index.html").write_text(render(s, slug, aggs, near))
         urls.append(f"{SITE}/pages/eki/{slug}/")
-        print(f"{slug}: 1km圏 {aggs[1000]['pop']:,}人")
+        index_items.append(f'<li><a href="{slug}/">{s["n"]}駅</a></li>')
+        if (i + 1) % 200 == 0:
+            print(f"{i + 1}/{len(targets)} generated")
     (OUT / "sitemap.txt").write_text("\n".join(urls) + "\n")
+    (OUT / "index.html").write_text(f"""<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>駅別の商圏人口データ一覧（乗降客数順） | 商圏メーカー</title>
+<meta name="description" content="全国{len(urls)}駅の商圏人口・年齢構成データ。半径500m/1km/3kmの常住人口と人口ピラミッドを2020年国勢調査から集計。">
+<link rel="canonical" href="{SITE}/pages/eki/">
+<style>
+body{{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#0b0b0b;background:#fcfcfb;max-width:900px;margin:0 auto;padding:20px 16px;line-height:1.7}}
+ul{{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:2px;font-size:13.5px}}
+.muted{{color:#898781;font-size:12px}}
+</style>
+</head>
+<body>
+<p class="muted"><a href="{SITE}/">商圏メーカー</a> › 駅一覧</p>
+<h1>駅別の商圏人口データ（乗降客数順）</h1>
+<p>地図で自由に円を描いて調べるには<a href="{SITE}/">商圏メーカー本体</a>へ。</p>
+<ul>{"".join(index_items)}</ul>
+<p class="muted">出典: 総務省統計局「令和2年国勢調査」500mメッシュ（e-Stat 統計GIS）・国土数値情報 駅別乗降客数(S12)を加工して作成。</p>
+</body>
+</html>""")
     print(f"done: {len(urls)} pages -> {OUT}")
 
 
