@@ -1,0 +1,229 @@
+#!/usr/bin/env python3
+"""駅ごとの商圏ページ(静的HTML)を生成する。
+
+使い方:
+  python3 scripts/gen_pages.py --sample     # 上位5駅だけ生成(レビュー用)
+  python3 scripts/gen_pages.py --top 2000   # 乗降客数上位2000駅を生成
+
+出力: web/pages/eki/{slug}/index.html と web/pages/eki/sitemap.txt
+slug: 駅名(同名衝突は乗降客数順に -2, -3 を付与)
+"""
+import argparse
+import json
+import math
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+DATA = ROOT / "web" / "data"
+OUT = ROOT / "web" / "pages" / "eki"
+SITE = "https://shoken-maker.vercel.app"
+
+DLAT = 15 / 3600
+DLON = 22.5 / 3600
+N_BANDS = 20
+BAND_LABELS = ["0-4", "5-9", "10-14", "15-19", "20-24", "25-29", "30-34", "35-39",
+               "40-44", "45-49", "50-54", "55-59", "60-64", "65-69", "70-74",
+               "75-79", "80-84", "85-89", "90-94", "95+"]
+RADII = [500, 1000, 3000]
+
+_mesh_cache: dict[str, list] = {}
+
+
+def mesh_centroid(code: str) -> tuple[float, float]:
+    p, q = int(code[:2]), int(code[2:4])
+    a, b, c, d, m = (int(x) for x in code[4:9])
+    lat = p / 1.5 + a * (5 / 60) + c * (1 / 120)
+    lon = 100 + q + b * (7.5 / 60) + d * (1 / 80)
+    if m in (3, 4):
+        lat += DLAT
+    if m in (2, 4):
+        lon += DLON
+    return lat + DLAT / 2, lon + DLON / 2
+
+
+def load_mesh(code1: str):
+    if code1 not in _mesh_cache:
+        f = DATA / f"{code1}.json"
+        if not f.exists():
+            _mesh_cache[code1] = []
+        else:
+            rows = json.loads(f.read_text())
+            _mesh_cache[code1] = [(*mesh_centroid(r[0]), r[1:]) for r in rows]
+    return _mesh_cache[code1]
+
+
+def aggregate(clat: float, clon: float, r: float) -> dict:
+    margin = 400
+    dlat_r = (r + margin) / 110946
+    dlon_r = (r + margin) / (111320 * math.cos(math.radians(clat)))
+    cells = []
+    for p in range(int((clat - dlat_r) * 1.5), int((clat + dlat_r) * 1.5) + 1):
+        for q in range(int(clon - dlon_r) - 100, int(clon + dlon_r) - 100 + 1):
+            cells += load_mesh(f"{p}{q:02d}")
+    kx = 111320 * math.cos(math.radians(clat))
+    ky = 110946
+    r2 = r * r
+    nv = 5 + 2 * N_BANDS
+    s = [0.0] * nv
+    age_num = age_den = 0.0
+    for la, lo, v in cells:
+        inside = 0
+        for sy in (-DLAT / 4, DLAT / 4):
+            for sx in (-DLON / 4, DLON / 4):
+                dx = (lo + sx - clon) * kx
+                dy = (la + sy - clat) * ky
+                if dx * dx + dy * dy <= r2:
+                    inside += 1
+        if not inside:
+            continue
+        w = inside / 4
+        for i in range(nv):
+            if i != 4 and v[i] is not None:
+                s[i] += v[i] * w
+        if v[4] is not None and v[0] is not None:
+            age_num += v[4] * v[0] * w
+            age_den += v[0] * w
+    bands = [(round(s[5 + 2 * i]), round(s[6 + 2 * i])) for i in range(N_BANDS)]
+    return {
+        "pop": round(s[0]), "male": round(s[1]), "female": round(s[2]), "hh": round(s[3]),
+        "mean_age": age_num / age_den if age_den else None,
+        "bands": bands,
+    }
+
+
+def pyramid_svg(bands, pop) -> str:
+    if pop <= 0:
+        return ""
+    mx = max(max(m, f) for m, f in bands) or 1
+    rows = []
+    bar_h, gap, half_w, lbl_w = 10, 2, 150, 46
+    hgt = N_BANDS * (bar_h + gap)
+    for i, (m, f) in enumerate(reversed(bands)):
+        y = i * (bar_h + gap)
+        wm = m / mx * half_w
+        wf = f / mx * half_w
+        lbl = BAND_LABELS[N_BANDS - 1 - i]
+        rows.append(
+            f'<rect x="{half_w - wm:.1f}" y="{y}" width="{wm:.1f}" height="{bar_h}" rx="3" fill="#2a78d6"/>'
+            f'<rect x="{half_w + lbl_w:.0f}" y="{y}" width="{wf:.1f}" height="{bar_h}" rx="3" fill="#eb6834"/>'
+            f'<text x="{half_w + lbl_w / 2:.0f}" y="{y + bar_h - 1}" text-anchor="middle" font-size="8.5" fill="#898781">{lbl}</text>'
+        )
+    return (f'<svg viewBox="0 0 {2 * half_w + lbl_w} {hgt}" xmlns="http://www.w3.org/2000/svg" '
+            f'role="img" aria-label="人口ピラミッド">{"".join(rows)}</svg>')
+
+
+def fmt(n) -> str:
+    return f"{n:,}"
+
+
+def band_sum(bands, lo, hi) -> int:
+    return sum(m + f for m, f in bands[lo:hi + 1])
+
+
+def render(st, slug: str, aggs: dict, nearby: list) -> str:
+    name = st["n"]
+    lines = "・".join(st["l"][:4]) + ("ほか" if len(st["l"]) > 4 else "")
+    a1 = aggs[1000]
+    senior = band_sum(a1["bands"], 13, 19)
+    senior_pct = senior / a1["pop"] * 100 if a1["pop"] else 0
+    pax = f'1日あたりの乗降客数は約{fmt(st["p"])}人（2023年度・国土数値情報）。' if st.get("p") else ""
+    mean_age = f'{a1["mean_age"]:.1f}歳' if a1["mean_age"] else "—"
+
+    rows = "".join(
+        f'<tr><td>半径{r/1000:g}km</td><td>{fmt(a["pop"])}人</td><td>{fmt(a["hh"])}世帯</td>'
+        f'<td>{a["mean_age"]:.1f}歳</td></tr>' if a["mean_age"] else
+        f'<tr><td>半径{r/1000:g}km</td><td>{fmt(a["pop"])}人</td><td>{fmt(a["hh"])}世帯</td><td>—</td></tr>'
+        for r, a in aggs.items()
+    )
+    near_links = "".join(
+        f'<li><a href="../{nslug}/">{nst["n"]}駅の商圏人口</a>（約{dist:.1f}km）</li>'
+        for nst, nslug, dist in nearby
+    )
+    tool = f'{SITE}/?lat={st["la"]}&lng={st["lo"]}&r=1000'
+    return f"""<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{name}駅の商圏人口・年齢構成（半径500m/1km/3km）| 商圏メーカー</title>
+<meta name="description" content="{name}駅（{lines}）の商圏人口: 半径1km圏の常住人口は約{fmt(a1['pop'])}人・{fmt(a1['hh'])}世帯、平均年齢{mean_age}。2020年国勢調査500mメッシュによる無料の商圏分析。">
+<link rel="canonical" href="{SITE}/pages/eki/{slug}/">
+<style>
+body{{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#0b0b0b;background:#fcfcfb;max-width:720px;margin:0 auto;padding:20px 16px;line-height:1.7}}
+h1{{font-size:22px}}h2{{font-size:16px;margin-top:28px}}
+table{{border-collapse:collapse;width:100%;font-size:14px}}
+td,th{{border-bottom:1px solid #e1e0d9;padding:8px 10px;text-align:right}}
+td:first-child,th:first-child{{text-align:left}}
+.cta{{display:inline-block;background:#2a78d6;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;margin:14px 0}}
+.muted{{color:#898781;font-size:12px}}
+svg{{max-width:380px;width:100%}}
+ul{{padding-left:20px}}
+</style>
+</head>
+<body>
+<p class="muted"><a href="{SITE}/">商圏メーカー</a> › {name}駅</p>
+<h1>{name}駅の商圏人口・年齢構成</h1>
+<p>{name}駅（{lines}）周辺の常住人口を2020年国勢調査の500mメッシュ統計から集計しました。{pax}
+半径1km圏の人口は<strong>約{fmt(a1["pop"])}人・{fmt(a1["hh"])}世帯</strong>、平均年齢は{mean_age}、
+65歳以上の比率は{senior_pct:.1f}%です。</p>
+<a class="cta" href="{tool}">地図で円を動かして詳しく見る →</a>
+<h2>半径別の商圏規模</h2>
+<table>
+<tr><th>範囲</th><th>常住人口</th><th>世帯数</th><th>平均年齢</th></tr>
+{rows}
+</table>
+<h2>人口ピラミッド（半径1km・5歳階級）</h2>
+{pyramid_svg(a1["bands"], a1["pop"])}
+<p class="muted">左=男性・右=女性。2020年国勢調査は都心部で年齢不詳率が高く、内訳合計は総数に一致しない場合があります。</p>
+<h2>近くの駅</h2>
+<ul>{near_links}</ul>
+<p class="muted">出典: 総務省統計局「令和2年国勢調査」500mメッシュ（e-Stat 統計GIS）・国土数値情報 駅別乗降客数(S12)を加工して作成。
+数値は常住（夜間）人口の概算です。<a href="https://github.com/hatsu-kawabata/shoken-maker">オープンソース(MIT)</a></p>
+</body>
+</html>"""
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--sample", action="store_true")
+    ap.add_argument("--top", type=int, default=0)
+    args = ap.parse_args()
+
+    stations = json.loads((DATA / "stations.json").read_text())
+    n = 5 if args.sample else (args.top or 2000)
+    targets = [s for s in stations if s.get("p")][:n]
+
+    # slug割当(全駅対象・乗降客数順で衝突に-2,-3…)
+    slugs: dict[int, str] = {}
+    used: dict[str, int] = {}
+    for i, s in enumerate(stations):
+        k = used.get(s["n"], 0) + 1
+        used[s["n"]] = k
+        slugs[i] = s["n"] if k == 1 else f'{s["n"]}-{k}'
+    idx = {id(s): i for i, s in enumerate(stations)}
+
+    OUT.mkdir(parents=True, exist_ok=True)
+    urls = []
+    for s in targets:
+        slug = slugs[idx[id(s)]]
+        aggs = {r: aggregate(s["la"], s["lo"], r) for r in RADII}
+        if aggs[1000]["pop"] == 0:
+            continue
+        near = sorted(
+            ((t, slugs[idx[id(t)]],
+              math.hypot((t["lo"] - s["lo"]) * 111320 * math.cos(math.radians(s["la"])),
+                         (t["la"] - s["la"]) * 110946) / 1000)
+             for t in targets if t is not s),
+            key=lambda x: x[2],
+        )[:5]
+        d = OUT / slug
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "index.html").write_text(render(s, slug, aggs, near))
+        urls.append(f"{SITE}/pages/eki/{slug}/")
+        print(f"{slug}: 1km圏 {aggs[1000]['pop']:,}人")
+    (OUT / "sitemap.txt").write_text("\n".join(urls) + "\n")
+    print(f"done: {len(urls)} pages -> {OUT}")
+
+
+if __name__ == "__main__":
+    main()

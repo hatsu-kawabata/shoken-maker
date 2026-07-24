@@ -102,6 +102,7 @@ body {
 }
 .addr-list li:hover, .addr-list li.active { background: var(--grid); }
 .addr-list li.empty { color: var(--text-muted); cursor: default; }
+.cand-sub { font-size: 11px; color: var(--text-muted); }
 
 .layout { flex: 1; display: flex; min-height: 0; }
 #map { flex: 1; min-width: 0; }

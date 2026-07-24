@@ -187,44 +187,70 @@ function setCenter(latlng) {
 
 map.on("click", (e) => setCenter(e.latlng));
 
-// ---- 住所検索（地理院 AddressSearch API・CORS開放済み） ----
+// ---- 検索: 駅名(ローカル・乗降客数順) + 住所(地理院 AddressSearch API) ----
 const addrInput = document.getElementById("addr");
 const addrList = document.getElementById("addrList");
 let addrSeq = 0;
+let stations = null; // 遅延ロード
+
+async function loadStations() {
+  if (stations) return stations;
+  try {
+    stations = await (await fetch("data/stations.json")).json();
+  } catch {
+    stations = [];
+  }
+  return stations;
+}
 
 function closeAddrList() {
   addrList.hidden = true;
   addrList.replaceChildren();
 }
 
+function resultItem(label, sub, lat, lon, zoom) {
+  const li = document.createElement("li");
+  li.innerHTML = sub
+    ? `${label} <span class="cand-sub">${sub}</span>`
+    : label;
+  li.addEventListener("click", () => {
+    closeAddrList();
+    addrInput.value = label.replace(/<[^>]*>/g, "");
+    const ll = L.latLng(lat, lon);
+    map.setView(ll, Math.max(map.getZoom(), zoom));
+    setCenter(ll);
+  });
+  return li;
+}
+
 async function searchAddress(q) {
   const seq = ++addrSeq;
-  const url = `https://msearch.gsi.go.jp/address-search/AddressSearch?q=${encodeURIComponent(q)}`;
-  let feats = [];
-  try {
-    feats = await (await fetch(url)).json();
-  } catch {
-    feats = [];
-  }
+  const norm = q.replace(/駅$/, "");
+  const [sts, feats] = await Promise.all([
+    loadStations(),
+    fetch(`https://msearch.gsi.go.jp/address-search/AddressSearch?q=${encodeURIComponent(q)}`)
+      .then((r) => r.json())
+      .catch(() => []),
+  ]);
   if (seq !== addrSeq) return;
   addrList.replaceChildren();
-  if (!feats.length) {
+
+  // 駅: 前方一致優先→部分一致。乗降客数順(stations.jsonが降順)
+  const pre = sts.filter((s) => s.n.startsWith(norm));
+  const part = sts.filter((s) => !s.n.startsWith(norm) && s.n.includes(norm));
+  for (const s of [...pre, ...part].slice(0, 6)) {
+    const paxTxt = s.p ? `${s.p.toLocaleString("ja-JP")}人/日` : "";
+    const lineTxt = s.l.slice(0, 2).join("・") + (s.l.length > 2 ? " ほか" : "");
+    addrList.append(resultItem(`<b>${s.n}駅</b>`, `${lineTxt} ${paxTxt}`, s.la, s.lo, 15));
+  }
+  for (const f of feats.slice(0, 6)) {
+    const [lon, lat] = f.geometry.coordinates;
+    addrList.append(resultItem(f.properties.title, "", lat, lon, 13));
+  }
+  if (!addrList.children.length) {
     const li = document.createElement("li");
     li.className = "empty";
     li.textContent = "見つかりませんでした";
-    addrList.append(li);
-  }
-  for (const f of feats.slice(0, 8)) {
-    const [lon, lat] = f.geometry.coordinates;
-    const li = document.createElement("li");
-    li.textContent = f.properties.title;
-    li.addEventListener("click", () => {
-      closeAddrList();
-      addrInput.value = f.properties.title;
-      const ll = L.latLng(lat, lon);
-      map.setView(ll, Math.max(map.getZoom(), 13));
-      setCenter(ll);
-    });
     addrList.append(li);
   }
   addrList.hidden = false;
