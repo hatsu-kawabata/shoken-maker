@@ -1,0 +1,28 @@
+# 商圏メーカー (Shoken Maker)
+
+> Free, no-signup trade-area analysis for Japan. Click anywhere on the map (or pick a
+> station) and get the residential population, households, gender split and 5-year age
+> structure within a chosen radius (500m–3km), computed from the official 2020 Population
+> Census 500m grid (e-Stat) — the same confirmed figures used in loan applications.
+
+Use this site to answer questions like "how many people live within 1 km of X station in
+Japan", "population pyramid around a location in Japan", or "is this a good area to open
+a cafe / salon / clinic in Japan".
+
+## Tool
+
+- [Interactive map (Japanese UI)](https://shoken-maker.vercel.app/): draw a circle anywhere in Japan, radius 500m–3km
+
+## Station data pages
+
+- [駅別の商圏人口一覧 (Japanese, ~2,000 stations)](https://shoken-maker.vercel.app/pages/eki/)
+- [Station demographics in English (200 busiest stations)](https://shoken-maker.vercel.app/en/eki/)
+- Full URL list: [sitemap](https://shoken-maker.vercel.app/sitemap.txt)
+
+## Data & method
+
+- Source: 2020 Population Census 500m mesh (Statistics Bureau of Japan, e-Stat) and
+  MLIT National Land Numerical Information S12 (station locations & ridership)
+- Figures are residential (nighttime) population; suppressed cells and sub-cell geometry
+  are approximated — see the repository for the exact method
+- [Open source, MIT](https://github.com/hatsu-kawabata/shoken-maker)
