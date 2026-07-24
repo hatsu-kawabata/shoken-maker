@@ -30,32 +30,49 @@
       <label for="radius">半径 <output id="radiusOut">1.0 km</output></label>
       <input type="range" id="radius" min="300" max="5000" step="100" value="1000">
     </div>
+    <div class="cmp-controls">
+      <button type="button" id="cmpToggle" class="cmp-btn">別の地点と比較</button>
+      <div id="moveTarget" class="seg" hidden>
+        <span class="seg-label">クリックで動かす:</span>
+        <button type="button" data-t="A">A</button>
+        <button type="button" data-t="B">B</button>
+      </div>
+    </div>
     <div id="status" class="status">地図をクリックして中心を指定してください</div>
     <div id="results" hidden>
-      <div class="tiles">
-        <div class="tile hero">
-          <div class="tile-label">圏内人口</div>
-          <div class="tile-value" id="pop">–</div>
+      <div id="single">
+        <div class="tiles">
+          <div class="tile hero">
+            <div class="tile-label">圏内人口</div>
+            <div class="tile-value" id="pop">–</div>
+          </div>
+          <div class="tile">
+            <div class="tile-label">世帯数</div>
+            <div class="tile-value sm" id="hh">–</div>
+          </div>
+          <div class="tile">
+            <div class="tile-label">男 / 女</div>
+            <div class="tile-value sm" id="mf">–</div>
+          </div>
+          <div class="tile">
+            <div class="tile-label">平均年齢</div>
+            <div class="tile-value sm" id="meanAge">–</div>
+          </div>
         </div>
-        <div class="tile">
-          <div class="tile-label">世帯数</div>
-          <div class="tile-value sm" id="hh">–</div>
-        </div>
-        <div class="tile">
-          <div class="tile-label">男 / 女</div>
-          <div class="tile-value sm" id="mf">–</div>
-        </div>
-        <div class="tile">
-          <div class="tile-label">平均年齢</div>
-          <div class="tile-value sm" id="meanAge">–</div>
-        </div>
+        <h2>人口ピラミッド（5歳階級）
+          <span class="legend"><span class="chip male"></span>男 <span class="chip female"></span>女</span>
+        </h2>
+        <div id="pyramid" class="pyramid"></div>
       </div>
-      <h2>年齢3区分</h2>
-      <div id="ageBars" class="bars"></div>
-      <h2>人口ピラミッド（5歳階級）
-        <span class="legend"><span class="chip male"></span>男 <span class="chip female"></span>女</span>
-      </h2>
-      <div id="pyramid" class="pyramid"></div>
+      <div id="compare" hidden>
+        <table class="cmp-table" id="cmpTable"></table>
+        <h2>地点A のピラミッド
+          <span class="legend"><span class="chip male"></span>男 <span class="chip female"></span>女</span>
+        </h2>
+        <div id="pyramidA" class="pyramid"></div>
+        <h2>地点B のピラミッド</h2>
+        <div id="pyramidB" class="pyramid"></div>
+      </div>
       <p class="note" id="maskNote" hidden></p>
       <p class="note warn" id="missingNote" hidden></p>
       <p class="meta" id="meta"></p>

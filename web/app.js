@@ -11,24 +11,34 @@ const els = {
   radiusOut: document.getElementById("radiusOut"),
   status: document.getElementById("status"),
   results: document.getElementById("results"),
+  single: document.getElementById("single"),
+  compare: document.getElementById("compare"),
   pop: document.getElementById("pop"),
   hh: document.getElementById("hh"),
   mf: document.getElementById("mf"),
   meanAge: document.getElementById("meanAge"),
-  ageBars: document.getElementById("ageBars"),
   pyramid: document.getElementById("pyramid"),
+  cmpTable: document.getElementById("cmpTable"),
+  pyramidA: document.getElementById("pyramidA"),
+  pyramidB: document.getElementById("pyramidB"),
+  cmpToggle: document.getElementById("cmpToggle"),
+  moveTarget: document.getElementById("moveTarget"),
   maskNote: document.getElementById("maskNote"),
   missingNote: document.getElementById("missingNote"),
   meta: document.getElementById("meta"),
 };
 
+const COLOR = { A: "#2a78d6", B: "#4a3aa7" };
+
 let manifest = null;
 const meshCache = new Map(); // code1 -> {cells} | "missing" | Promise
-let center = null;
-let circle = null;
+const centers = { A: null, B: null };
+const circles = { A: null, B: null };
+let compareMode = false;
+let moveTarget = "A";
 let computeSeq = 0;
 
-// URL共有: ?lat=..&lng=..&r=.. で状態を復元する
+// ---- URL共有: ?lat&lng&r(&lat2&lng2) ----
 function applyUrlState() {
   const p = new URLSearchParams(location.search);
   const lat = parseFloat(p.get("lat")), lng = parseFloat(p.get("lng")), r = parseInt(p.get("r"), 10);
@@ -37,17 +47,25 @@ function applyUrlState() {
     els.radius.value = r;
     els.radiusOut.textContent = `${(r / 1000).toFixed(1)} km`;
   }
-  const ll = L.latLng(lat, lng);
-  map.setView(ll, 14);
-  setCenter(ll);
+  map.setView([lat, lng], 14);
+  setPoint("A", L.latLng(lat, lng));
+  const lat2 = parseFloat(p.get("lat2")), lng2 = parseFloat(p.get("lng2"));
+  if (Number.isFinite(lat2) && Number.isFinite(lng2)) {
+    setCompareMode(true);
+    setPoint("B", L.latLng(lat2, lng2));
+  }
 }
 
 function syncUrl() {
-  if (!center) return;
+  if (!centers.A) return;
   const p = new URLSearchParams();
-  p.set("lat", center.lat.toFixed(5));
-  p.set("lng", center.lng.toFixed(5));
+  p.set("lat", centers.A.lat.toFixed(5));
+  p.set("lng", centers.A.lng.toFixed(5));
   p.set("r", els.radius.value);
+  if (compareMode && centers.B) {
+    p.set("lat2", centers.B.lat.toFixed(5));
+    p.set("lng2", centers.B.lng.toFixed(5));
+  }
   history.replaceState(null, "", `?${p}`);
 }
 
@@ -79,18 +97,24 @@ async function loadMesh(code1) {
 
 const fmt = (n) => n.toLocaleString("ja-JP");
 
-// 人口ピラミッド(5歳階級×男女)。横幅は「性別バンド人口/総人口」の%を左右対称スケールで描く
+async function aggregateAt(center, r) {
+  const [latMin, latMax, lonMin, lonMax] = circleBBox(center.lat, center.lng, r);
+  const codes = primaryMeshesInBBox(latMin, latMax, lonMin, lonMax);
+  const loaded = await Promise.all(codes.map(loadMesh));
+  const missing = codes.filter((_, i) => loaded[i] === "missing");
+  const cells = loaded.filter((m) => m !== "missing").flatMap((m) => m.cells);
+  return { agg: aggregateCircle(cells, center.lat, center.lng, r), missing };
+}
+
+// ---- 人口ピラミッド(5歳階級×男女) ----
 const BAND_LABELS = ["0-4", "5-9", "10-14", "15-19", "20-24", "25-29", "30-34", "35-39",
   "40-44", "45-49", "50-54", "55-59", "60-64", "65-69", "70-74", "75-79", "80-84",
   "85-89", "90-94", "95+"];
 
-function renderPyramid(bands, total) {
-  els.pyramid.replaceChildren();
+function renderPyramid(container, bands, total) {
+  container.replaceChildren();
   if (total <= 0) return;
-  const maxPct = Math.max(
-    0.1,
-    ...bands.map((b) => Math.max(b.m, b.f) / total * 100),
-  );
+  const maxPct = Math.max(0.1, ...bands.map((b) => Math.max(b.m, b.f) / total * 100));
   for (let i = N_BANDS - 1; i >= 0; i--) {
     const { m, f } = bands[i];
     const pm = (m / total) * 100, pf = (f / total) * 100;
@@ -101,91 +125,122 @@ function renderPyramid(bands, total) {
       <div class="pyr-side"><div class="pyr-bar male" style="width:${(pm / maxPct) * 100}%"></div></div>
       <span class="pyr-lbl">${BAND_LABELS[i]}</span>
       <div class="pyr-side right"><div class="pyr-bar female" style="width:${(pf / maxPct) * 100}%"></div></div>`;
-    els.pyramid.append(row);
+    container.append(row);
   }
 }
 
-function barRow(label, value, pct, sub = false) {
-  const row = document.createElement("div");
-  row.className = "bar-row" + (sub ? " sub" : "");
-  const w = Math.max(0, Math.min(100, pct));
-  row.innerHTML = `
-    <span class="lbl">${label}</span>
-    <div class="bar-track">
-      <div class="grid-line"></div>
-      <div class="bar-fill" style="width:${w}%"></div>
-      <div class="bar-val" style="left:${w}%">${fmt(value)}人 (${pct.toFixed(1)}%)</div>
-    </div>`;
-  return row;
+function renderSingle(agg) {
+  const { pop: total, male, female, hh, meanAge, bands } = agg;
+  els.pop.innerHTML = `${fmt(total)}<span class="unit">人</span>`;
+  els.hh.innerHTML = `${fmt(hh)}<span class="unit">世帯</span>`;
+  els.mf.textContent = `${fmt(male)} / ${fmt(female)}`;
+  els.meanAge.innerHTML = meanAge == null ? "–" : `${meanAge.toFixed(1)}<span class="unit">歳</span>`;
+  renderPyramid(els.pyramid, bands, total);
+}
+
+function renderCompare(aggA, aggB) {
+  const row = (label, va, vb) => `<tr><td>${label}</td><td>${va}</td><td>${vb}</td></tr>`;
+  const age = (a) => (a.meanAge == null ? "–" : `${a.meanAge.toFixed(1)}歳`);
+  const seniorPct = (a) => (a.pop > 0 ? `${(bandSum(a.bands, 13, N_BANDS - 1) / a.pop * 100).toFixed(1)}%` : "–");
+  const diff = aggA.pop > 0 ? ((aggB.pop - aggA.pop) / aggA.pop) * 100 : null;
+  els.cmpTable.innerHTML = `
+    <tr><th></th><th><span class="dot" style="background:${COLOR.A}"></span>地点A</th>
+        <th><span class="dot" style="background:${COLOR.B}"></span>地点B</th></tr>
+    ${row("人口", fmt(aggA.pop), fmt(aggB.pop) + (diff == null ? "" : ` <span class="delta">(${diff >= 0 ? "+" : ""}${diff.toFixed(0)}%)</span>`))}
+    ${row("世帯数", fmt(aggA.hh), fmt(aggB.hh))}
+    ${row("平均年齢", age(aggA), age(aggB))}
+    ${row("65歳以上", seniorPct(aggA), seniorPct(aggB))}`;
+  renderPyramid(els.pyramidA, aggA.bands, aggA.pop);
+  renderPyramid(els.pyramidB, aggB.bands, aggB.pop);
 }
 
 async function recompute() {
-  if (!center || !manifest) return;
+  if (!centers.A || !manifest) return;
   const seq = ++computeSeq;
   const r = +els.radius.value;
   els.status.textContent = "計算中…";
   els.status.hidden = false;
 
-  const [latMin, latMax, lonMin, lonMax] = circleBBox(center.lat, center.lng, r);
-  const codes = primaryMeshesInBBox(latMin, latMax, lonMin, lonMax);
-  const loaded = await Promise.all(codes.map(loadMesh));
+  const resA = await aggregateAt(centers.A, r);
+  const resB = compareMode && centers.B ? await aggregateAt(centers.B, r) : null;
   if (seq !== computeSeq) return; // 古い計算は破棄
-
-  const missing = codes.filter((_, i) => loaded[i] === "missing");
-  const cells = loaded.filter((m) => m !== "missing").flatMap((m) => m.cells);
-  const agg = aggregateCircle(cells, center.lat, center.lng, r);
-  const { pop: total, male, female, hh, meanAge, bands, cellCount, maskedPop } = agg;
 
   els.status.hidden = true;
   els.results.hidden = false;
-  els.pop.innerHTML = `${fmt(total)}<span class="unit">人</span>`;
-  els.hh.innerHTML = `${fmt(hh)}<span class="unit">世帯</span>`;
-  els.mf.textContent = `${fmt(male)} / ${fmt(female)}`;
-  els.meanAge.innerHTML = meanAge == null ? "–" : `${meanAge.toFixed(1)}<span class="unit">歳</span>`;
-
-  els.ageBars.replaceChildren();
-  if (total > 0) {
-    const a0_14 = bandSum(bands, 0, 2);
-    const a15_64 = bandSum(bands, 3, 12);
-    const a65p = bandSum(bands, 13, N_BANDS - 1);
-    const a75p = bandSum(bands, 15, N_BANDS - 1);
-    const pct = (v) => (v / total) * 100;
-    els.ageBars.append(
-      barRow("0〜14歳", a0_14, pct(a0_14)),
-      barRow("15〜64歳", a15_64, pct(a15_64)),
-      barRow("65歳以上", a65p, pct(a65p)),
-      barRow("うち75歳〜", a75p, pct(a75p), true),
-    );
+  const showCompare = resB != null;
+  els.single.hidden = showCompare;
+  els.compare.hidden = !showCompare;
+  if (showCompare) {
+    renderCompare(resA.agg, resB.agg);
+  } else {
+    renderSingle(resA.agg);
+    if (compareMode) els.status.hidden = false, els.status.textContent = "地図をクリックして地点Bを指定してください";
   }
-  renderPyramid(bands, total);
 
-  // 年齢内訳に出ない分 = 年齢不詳 + 秘匿セル(合算先計上)
-  const shortfall = total - bandSum(bands, 0, N_BANDS - 1);
-  els.maskNote.hidden = shortfall < total * 0.005;
+  const agg = resA.agg;
+  const shortfall = agg.pop - bandSum(agg.bands, 0, N_BANDS - 1);
+  els.maskNote.hidden = showCompare || shortfall < agg.pop * 0.005;
   if (!els.maskNote.hidden) {
-    els.maskNote.textContent = `※ 約${fmt(shortfall)}人(${((shortfall / total) * 100).toFixed(1)}%)は年齢内訳なし（年齢不詳・秘匿セル）`;
+    els.maskNote.textContent = `※ 約${fmt(shortfall)}人(${((shortfall / agg.pop) * 100).toFixed(1)}%)は年齢内訳なし（年齢不詳・秘匿セル）`;
   }
+  const missing = [...resA.missing, ...(resB ? resB.missing : [])];
   els.missingNote.hidden = missing.length === 0;
   if (missing.length > 0) {
-    els.missingNote.textContent = `⚠ 未取込メッシュ ${missing.join(", ")} が圏内に掛かっています（fetch_mesh.py で追加可能）`;
+    els.missingNote.textContent = `⚠ 未取込メッシュ ${missing.join(", ")} が圏内に掛かっています`;
   }
-  els.meta.textContent = `半径 ${(r / 1000).toFixed(1)}km / 500mメッシュ ${fmt(cellCount)}セル / 中心 ${center.lat.toFixed(4)}, ${center.lng.toFixed(4)}`;
+  els.meta.textContent = `半径 ${(r / 1000).toFixed(1)}km / 中心A ${centers.A.lat.toFixed(4)}, ${centers.A.lng.toFixed(4)}` +
+    (showCompare ? ` / 中心B ${centers.B.lat.toFixed(4)}, ${centers.B.lng.toFixed(4)}` : "");
   syncUrl();
 }
 
-function setCenter(latlng) {
-  center = latlng;
+function setPoint(key, latlng) {
+  centers[key] = latlng;
   const r = +els.radius.value;
-  if (!circle) {
-    circle = L.circle(latlng, { radius: r, color: "#2a78d6", weight: 2, fillOpacity: 0.08 }).addTo(map);
+  if (!circles[key]) {
+    circles[key] = L.circle(latlng, { radius: r, color: COLOR[key], weight: 2, fillOpacity: 0.08 }).addTo(map);
   } else {
-    circle.setLatLng(latlng);
-    circle.setRadius(r);
+    circles[key].setLatLng(latlng);
+    circles[key].setRadius(r);
   }
   recompute();
 }
 
-map.on("click", (e) => setCenter(e.latlng));
+function removePoint(key) {
+  centers[key] = null;
+  if (circles[key]) {
+    circles[key].remove();
+    circles[key] = null;
+  }
+}
+
+function setCompareMode(on) {
+  compareMode = on;
+  els.cmpToggle.textContent = on ? "比較を終了" : "別の地点と比較";
+  els.cmpToggle.classList.toggle("active", on);
+  els.moveTarget.hidden = !on;
+  moveTarget = on ? "B" : "A";
+  updateMoveTargetUI();
+  if (!on) {
+    removePoint("B");
+  }
+  recompute();
+}
+
+function updateMoveTargetUI() {
+  for (const b of els.moveTarget.querySelectorAll("button")) {
+    b.classList.toggle("active", b.dataset.t === moveTarget);
+  }
+}
+
+els.cmpToggle.addEventListener("click", () => setCompareMode(!compareMode));
+els.moveTarget.addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  moveTarget = b.dataset.t;
+  updateMoveTargetUI();
+});
+
+map.on("click", (e) => setPoint(compareMode ? moveTarget : "A", e.latlng));
 
 // ---- 検索: 駅名(ローカル・乗降客数順) + 住所(地理院 AddressSearch API) ----
 const addrInput = document.getElementById("addr");
@@ -210,15 +265,13 @@ function closeAddrList() {
 
 function resultItem(label, sub, lat, lon, zoom) {
   const li = document.createElement("li");
-  li.innerHTML = sub
-    ? `${label} <span class="cand-sub">${sub}</span>`
-    : label;
+  li.innerHTML = sub ? `${label} <span class="cand-sub">${sub}</span>` : label;
   li.addEventListener("click", () => {
     closeAddrList();
     addrInput.value = label.replace(/<[^>]*>/g, "");
     const ll = L.latLng(lat, lon);
     map.setView(ll, Math.max(map.getZoom(), zoom));
-    setCenter(ll);
+    setPoint(compareMode ? moveTarget : "A", ll);
   });
   return li;
 }
@@ -235,7 +288,6 @@ async function searchAddress(q) {
   if (seq !== addrSeq) return;
   addrList.replaceChildren();
 
-  // 駅: 前方一致優先→部分一致。乗降客数順(stations.jsonが降順)
   const pre = sts.filter((s) => s.n.startsWith(norm));
   const part = sts.filter((s) => !s.n.startsWith(norm) && s.n.includes(norm));
   for (const s of [...pre, ...part].slice(0, 6)) {
@@ -279,7 +331,7 @@ document.addEventListener("click", (e) => {
 let debounce = null;
 els.radius.addEventListener("input", () => {
   els.radiusOut.textContent = `${(+els.radius.value / 1000).toFixed(1)} km`;
-  if (circle) circle.setRadius(+els.radius.value);
+  for (const k of ["A", "B"]) if (circles[k]) circles[k].setRadius(+els.radius.value);
   clearTimeout(debounce);
   debounce = setTimeout(recompute, 120);
 });
