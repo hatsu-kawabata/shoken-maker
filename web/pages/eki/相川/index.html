@@ -43,5 +43,13 @@ ul{padding-left:20px}
 </div>
 <p class="muted">出典: 総務省統計局「令和2年国勢調査」500mメッシュ（e-Stat 統計GIS）・国土数値情報 駅別乗降客数(S12)を加工して作成。
 数値は常住（夜間）人口の概算です。<a href="https://github.com/hatsu-kawabata/shoken-maker">オープンソース(MIT)</a></p>
+<script>
+if (/\.vercel\.app$/.test(location.hostname)) {
+  var s = document.createElement("script");
+  s.defer = true;
+  s.src = "/_vercel/insights/script.js";
+  document.head.appendChild(s);
+}
+</script>
 </body>
 </html>

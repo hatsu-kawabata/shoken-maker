@@ -26,6 +26,17 @@ EN_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSeKpROMSuAETstOQ4To5JsIJ
 # 上位200駅のローマ字slug(build_en_slugs.pyで検証付き生成)
 EN_SLUGS: dict[str, str] = json.loads((Path(__file__).resolve().parent / "en_slugs.json").read_text())
 
+# Vercel Web Analytics。生成ページにも入れる: これが無いと駅ページの流入も
+# 実験01bのAI referral(chatgpt.com/perplexity.ai)も観測できない。本番ホストでのみ発火。
+ANALYTICS = """<script>
+if (/\\.vercel\\.app$/.test(location.hostname)) {
+  var s = document.createElement("script");
+  s.defer = true;
+  s.src = "/_vercel/insights/script.js";
+  document.head.appendChild(s);
+}
+</script>"""
+
 DLAT = 15 / 3600
 DLON = 22.5 / 3600
 N_BANDS = 20
@@ -208,6 +219,7 @@ ul{{padding-left:20px}}
 </div>
 <p class="muted">出典: 総務省統計局「令和2年国勢調査」500mメッシュ（e-Stat 統計GIS）・国土数値情報 駅別乗降客数(S12)を加工して作成。
 数値は常住（夜間）人口の概算です。<a href="https://github.com/hatsu-kawabata/shoken-maker">オープンソース(MIT)</a></p>
+{ANALYTICS}
 </body>
 </html>"""
 
@@ -277,6 +289,7 @@ the average age is {mean_age}, and {senior_pct:.1f}% of residents are 65 or olde
 <a class="cta" style="margin:0" href="{EN_FORM_URL}">Join the early-access list →</a>
 </div>
 <p class="muted">Source: 2020 Population Census 500m grid (Statistics Bureau of Japan, e-Stat) and MLIT station ridership data (S12). Figures are approximate residential (nighttime) population. <a href="https://github.com/hatsu-kawabata/shoken-maker">Open source (MIT)</a></p>
+{ANALYTICS}
 </body>
 </html>"""
 
@@ -303,6 +316,7 @@ from the 2020 Population Census 500m grid. Or draw your own circle on the
 <a href="{SITE}/">interactive map</a> (interface in Japanese).</p>
 <ul>{"".join(items)}</ul>
 <p class="muted">Source: 2020 Population Census 500m grid (Statistics Bureau of Japan, e-Stat) and MLIT station data (S12). <a href="https://github.com/hatsu-kawabata/shoken-maker">Open source (MIT)</a></p>
+{ANALYTICS}
 </body>
 </html>"""
 
@@ -429,6 +443,7 @@ ul{{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fil
 <p>地図で自由に円を描いて調べるには<a href="{SITE}/">商圏メーカー本体</a>へ。</p>
 <ul>{"".join(index_items)}</ul>
 <p class="muted">出典: 総務省統計局「令和2年国勢調査」500mメッシュ（e-Stat 統計GIS）・国土数値情報 駅別乗降客数(S12)を加工して作成。</p>
+{ANALYTICS}
 </body>
 </html>""")
     print(f"done: {len(urls)} ja pages -> {OUT}, {len(urls_en)} en pages -> {EN_OUT}")
