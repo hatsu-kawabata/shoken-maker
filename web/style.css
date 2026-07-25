@@ -232,6 +232,27 @@ h2 { font-size: 13px; color: var(--text-secondary); font-weight: 600; }
 .note.warn { color: var(--warn-ink); }
 .meta { font-size: 11.5px; color: var(--text-muted); }
 
+.cta-box {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-1);
+}
+.cta-box p { font-size: 12.5px; color: var(--text-secondary); line-height: 1.6; }
+.cta-box .cta-head { font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; }
+.cta {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 9px 16px;
+  background: var(--series-1);
+  color: #fff;
+  font-size: 13px;
+  border-radius: 8px;
+  text-decoration: none;
+}
+.cta:hover { filter: brightness(1.08); }
+
 .src {
   margin-top: auto;
   font-size: 10.5px;
