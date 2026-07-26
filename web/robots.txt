@@ -1,4 +1,5 @@
 User-agent: *
 Allow: /
 
+Sitemap: https://shoken-maker.vercel.app/sitemap.xml
 Sitemap: https://shoken-maker.vercel.app/sitemap.txt

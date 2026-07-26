@@ -9,6 +9,8 @@
 slug: 駅名(同名衝突は乗降客数順に -2, -3 を付与)
 """
 import argparse
+import datetime
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -18,13 +20,19 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "web" / "data"
 OUT = ROOT / "web" / "pages" / "eki"
 EN_OUT = ROOT / "web" / "en" / "eki"
+# lastmod台帳: url -> {h: 本文ハッシュ, d: 最終更新日}。本文が変わった日だけ日付を進める
+# (全ページに毎回ビルド日を打つとlastmodが嘘になり、クロール優先度の判断材料として無価値になる)
+MANIFEST = Path(__file__).resolve().parent / "lastmod.json"
 SITE = "https://shoken-maker.vercel.app"
 # S4需要計器(scheme_funnel.md): 個別分析の事前登録フォーム。裏のサービスは未実装=純粋な需要温度計
 # 日英で別フォーム=セグメント別のS4信号(実験01b)
 FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSeD1Kkc6iHgvICicMsXude3PE27iuOfWPCvRTtfJeHEr2S9JA/viewform"
 EN_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSeKpROMSuAETstOQ4To5JsIJ17XZnFKTP0l522PrBbISxDLSg/viewform"
-# 上位200駅のローマ字slug(build_en_slugs.pyで検証付き生成)
+# 日本語slug→ローマ字slug(build_en_slugs.pyで検証付き生成。手書き200＋Wikidata機械層)
 EN_SLUGS: dict[str, str] = json.loads((Path(__file__).resolve().parent / "en_slugs.json").read_text())
+# 機械層の表示名(Wikidataの英語ラベル由来)。手書き層はここに無く、slugからの復元にフォールバックする
+# =公開済み200枚の見出し文字列を変えないための切り分け
+EN_NAMES: dict[str, str] = json.loads((Path(__file__).resolve().parent / "en_names.json").read_text())
 
 # Vercel Web Analytics。生成ページにも入れる: これが無いと駅ページの流入も
 # 実験01bのAI referral(chatgpt.com/perplexity.ai)も観測できない。本番ホストでのみ発火。
@@ -115,6 +123,8 @@ def aggregate(clat: float, clon: float, r: float) -> dict:
 
 
 def en_name(en_slug: str) -> str:
+    if en_slug in EN_NAMES:
+        return EN_NAMES[en_slug]
     base = en_slug.rsplit("-", 1)[0] if en_slug.rsplit("-", 1)[-1].isdigit() else en_slug
     return "-".join(w.capitalize() for w in base.split("-"))
 
@@ -265,7 +275,7 @@ ul{{padding-left:20px}}
 </style>
 </head>
 <body>
-<p class="muted"><a href="{SITE}/en/eki/">Shoken Maker</a> › {name} Station</p>
+<p class="muted"><a href="{SITE}/en/">Shoken Maker</a> › <a href="{SITE}/en/eki/">Stations</a> › {name} Station</p>
 <h1>{name} Station: Trade-Area Population &amp; Age Structure</h1>
 <p>Residential population around {name} Station, aggregated from the 500m grid of the
 2020 Population Census of Japan.{pax}
@@ -300,8 +310,8 @@ def render_en_index(items: list[str]) -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Japan Station Area Demographics in English ({len(items)} busiest stations) | Shoken Maker</title>
-<meta name="description" content="Trade-area population, households and age structure around Japan's {len(items)} busiest train stations, within 500m/1km/3km. Free data from the 2020 Census of Japan.">
+<title>Japan Station Area Demographics in English ({len(items):,} stations) | Shoken Maker</title>
+<meta name="description" content="Trade-area population, households and age structure around {len(items):,} Japanese train stations, within 500m/1km/3km. Free data from the 2020 Census of Japan.">
 <link rel="canonical" href="{SITE}/en/eki/">
 <style>
 body{{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#0b0b0b;background:#fcfcfb;max-width:900px;margin:0 auto;padding:20px 16px;line-height:1.7}}
@@ -310,10 +320,12 @@ ul{{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fil
 </style>
 </head>
 <body>
-<h1>Japan Station Area Demographics (by ridership)</h1>
-<p>Residential population, households and age structure around Japan's busiest train stations,
+<p class="muted"><a href="{SITE}/en/">Shoken Maker (English)</a> › Stations</p>
+<h1>Japan Station Area Demographics ({len(items):,} stations, by ridership)</h1>
+<p>Residential population, households and age structure around Japanese train stations,
 from the 2020 Population Census 500m grid. Or draw your own circle on the
-<a href="{SITE}/">interactive map</a> (interface in Japanese).</p>
+<a href="{SITE}/">interactive map</a> (interface in Japanese) — see the
+<a href="{SITE}/en/">English overview</a> for what the data means.</p>
 <ul>{"".join(items)}</ul>
 <p class="muted">Source: 2020 Population Census 500m grid (Statistics Bureau of Japan, e-Stat) and MLIT station data (S12). <a href="https://github.com/hatsu-kawabata/shoken-maker">Open source (MIT)</a></p>
 {ANALYTICS}
@@ -321,7 +333,108 @@ from the 2020 Population Census 500m grid. Or draw your own circle on the
 </html>"""
 
 
-LLMS_TXT = f"""# 商圏メーカー (Shoken Maker)
+def render_en_landing(n_en: int, n_ja: int) -> str:
+    """/en/ の英語ランディング。ここが404だと英語面に入口が無い(ツール本体のUIは日本語)。"""
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shoken Maker — Free Trade-Area Population Data for Japan (2020 Census)</title>
+<meta name="description" content="Free, no-signup trade-area analysis for Japan. Draw a circle on the map and get the population, households and age structure inside it, from the official 2020 Census 500m grid. Plus English demographic pages for {n_en:,} train stations.">
+<link rel="canonical" href="{SITE}/en/">
+<link rel="alternate" hreflang="ja" href="{SITE}/">
+<link rel="alternate" hreflang="en" href="{SITE}/en/">
+<link rel="alternate" hreflang="x-default" href="{SITE}/">
+<style>
+body{{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#0b0b0b;background:#fcfcfb;max-width:720px;margin:0 auto;padding:20px 16px;line-height:1.7}}
+h1{{font-size:23px}}h2{{font-size:16px;margin-top:28px}}
+table{{border-collapse:collapse;width:100%;font-size:14px}}
+td,th{{border-bottom:1px solid #e1e0d9;padding:8px 10px;text-align:left}}
+.cta{{display:inline-block;background:#2a78d6;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;margin:14px 0}}
+.muted{{color:#898781;font-size:12px}}
+ul{{padding-left:20px}}
+</style>
+</head>
+<body>
+<h1>How many people live within 1&nbsp;km of any point in Japan?</h1>
+<p>Shoken Maker is a free, no-signup tool that answers that. Draw a circle anywhere on a map of
+Japan (radius 500&nbsp;m–3&nbsp;km) and it returns the <strong>residential population, number of
+households, gender split and 5-year age structure</strong> inside the circle — computed from the
+official <strong>2020 Population Census 500&nbsp;m grid</strong> published by the Statistics Bureau
+of Japan (e-Stat).</p>
+<a class="cta" href="{SITE}/">Open the map tool →</a>
+<p class="muted">The tool's interface is in Japanese, but the circle and the numbers work without
+reading it: click the map, drag the radius slider, read the table.</p>
+<h2>Station demographics in English</h2>
+<p>Pre-computed pages for <strong>{n_en:,} train stations</strong>, each with population and age
+structure at 500&nbsp;m / 1&nbsp;km / 3&nbsp;km, a population pyramid and nearby stations.</p>
+<ul>
+<li><a href="{SITE}/en/eki/">Browse all {n_en:,} stations (English)</a></li>
+<li><a href="{SITE}/en/eki/shinjuku/">Shinjuku</a> ·
+    <a href="{SITE}/en/eki/shibuya/">Shibuya</a> ·
+    <a href="{SITE}/en/eki/umeda/">Umeda</a> ·
+    <a href="{SITE}/en/eki/hakata/">Hakata</a> ·
+    <a href="{SITE}/en/eki/sapporo/">Sapporo</a></li>
+<li><a href="{SITE}/pages/eki/">Japanese station index ({n_ja:,} stations)</a></li>
+</ul>
+<h2>What the data is — and is not</h2>
+<table>
+<tr><th>Figure</th><th>Meaning</th></tr>
+<tr><td>Population</td><td>Residential (nighttime) population — where people <em>live</em>, not daytime/worker population</td></tr>
+<tr><td>Households</td><td>Census households whose dwelling falls in the grid cells inside the circle</td></tr>
+<tr><td>Average age</td><td>From 5-year bands; central Tokyo/Osaka has a high share of unreported ages, so bands may not sum to the total</td></tr>
+<tr><td>Vintage</td><td>2020 Census (the most recent confirmed figures; the next census is 2025)</td></tr>
+</table>
+<p>Grid cells are counted when their centroid falls inside the circle, so a single 500&nbsp;m cell is
+either fully in or fully out. At a 500&nbsp;m radius that granularity matters; at 1&nbsp;km and above
+the error averages out.</p>
+<h2>Why use census grid data instead of a population API</h2>
+<p>Japanese census figures are the ones banks and landlords accept in loan applications and
+store-opening plans. The 500&nbsp;m grid is the finest official geography published for the whole
+country, and it is free to redistribute with attribution — which is why this site can be free and
+open source.</p>
+<div style="border:1px solid #e1e0d9;border-radius:10px;padding:14px 16px;margin:24px 0;background:#fff">
+<p style="margin:0 0 6px"><strong>📋 Opening a business in Japan?</strong></p>
+<p style="margin:0 0 10px;font-size:14px">We're preparing custom trade-area reports — demographics
+and market context around a specific location you're considering. Join the free early-access list
+(about 1 minute).</p>
+<a class="cta" style="margin:0" href="{EN_FORM_URL}">Join the early-access list →</a>
+</div>
+<p class="muted">Source: 2020 Population Census 500m grid (Statistics Bureau of Japan, e-Stat) and
+MLIT National Land Numerical Information S12 (station locations &amp; ridership). Processed and
+published by Shoken Maker. <a href="https://github.com/hatsu-kawabata/shoken-maker">Open source (MIT)</a> ·
+<a href="{SITE}/llms.txt">llms.txt</a></p>
+{ANALYTICS}
+</body>
+</html>"""
+
+
+def stamp_lastmod(hashes: dict[str, str], build_date: str) -> dict[str, str]:
+    """url→lastmod。本文ハッシュが前回と同じURLは前回の日付を保つ(=lastmodを嘘にしない)。"""
+    prev = json.loads(MANIFEST.read_text()) if MANIFEST.exists() else {}
+    cur = {url: {"h": h, "d": (prev[url]["d"] if url in prev and prev[url].get("h") == h
+                               else build_date)}
+           for url, h in hashes.items()}
+    MANIFEST.write_text(json.dumps(cur, ensure_ascii=False, sort_keys=True, indent=0) + "\n")
+    changed = sum(1 for u, v in cur.items() if v["d"] == build_date)
+    print(f"lastmod: {len(cur)} urls / 本文が変わった {changed}")
+    return {u: v["d"] for u, v in cur.items()}
+
+
+def sitemap_xml(lastmods: dict[str, str]) -> str:
+    """XMLサイトマップ。txt版と違い lastmod を渡せる＝再クロール判断の材料を出せる。"""
+    entries = "".join(
+        f"<url><loc>{url}</loc><lastmod>{lastmods[url]}</lastmod></url>\n"
+        for url in lastmods
+    )
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+            f"{entries}</urlset>\n")
+
+
+def llms_txt(n_ja: int, n_en: int) -> str:
+    return f"""# 商圏メーカー (Shoken Maker)
 
 > Free, no-signup trade-area analysis for Japan. Click anywhere on the map (or pick a
 > station) and get the residential population, households, gender split and 5-year age
@@ -335,12 +448,13 @@ a cafe / salon / clinic in Japan".
 ## Tool
 
 - [Interactive map (Japanese UI)]({SITE}/): draw a circle anywhere in Japan, radius 500m–3km
+- [English overview of the tool and the data]({SITE}/en/)
 
 ## Station data pages
 
-- [駅別の商圏人口一覧 (Japanese, ~2,000 stations)]({SITE}/pages/eki/)
-- [Station demographics in English (200 busiest stations)]({SITE}/en/eki/)
-- Full URL list: [sitemap]({SITE}/sitemap.txt)
+- [駅別の商圏人口一覧 (Japanese, {n_ja:,} stations)]({SITE}/pages/eki/)
+- [Station demographics in English ({n_en:,} stations)]({SITE}/en/eki/)
+- Full URL list: [sitemap]({SITE}/sitemap.xml)
 
 ## Data & method
 
@@ -356,7 +470,15 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--sample", action="store_true")
     ap.add_argument("--top", type=int, default=0)
+    ap.add_argument("--date", default=datetime.date.today().isoformat(),
+                    help="lastmodに打つビルド日(既定=今日)")
     args = ap.parse_args()
+    hashes: dict[str, str] = {}
+
+    def emit(path: Path, url: str, html: str) -> None:
+        """HTMLを書き、sitemapのlastmod判定用に本文ハッシュを覚える。"""
+        path.write_text(html)
+        hashes[url] = hashlib.sha1(html.encode()).hexdigest()[:12]
 
     stations = json.loads((DATA / "stations.json").read_text())
     n = 5 if args.sample else (args.top or 2000)
@@ -390,7 +512,8 @@ def main() -> None:
         d = OUT / slug
         d.mkdir(parents=True, exist_ok=True)
         en_slug = EN_SLUGS.get(slug)
-        (d / "index.html").write_text(render(s, slug, aggs, near, en_slug))
+        emit(d / "index.html", f"{SITE}/pages/eki/{quote(slug)}/",
+             render(s, slug, aggs, near, en_slug))
         if en_slug:
             en_pages.append((s, slug, en_slug, aggs))
         urls.append(f"{SITE}/pages/eki/{slug}/")
@@ -398,7 +521,7 @@ def main() -> None:
         if (i + 1) % 200 == 0:
             print(f"{i + 1}/{len(targets)} generated")
 
-    # 実験01b: 英語面(上位200駅・LLMO)。近隣リンクは英語ページ同士で張る
+    # 実験01b: 英語面(日本語ページと同じ駅集合＝日英対称)。近隣リンクは英語ページ同士で張る
     EN_OUT.mkdir(parents=True, exist_ok=True)
     en_index_items = []
     urls_en = []
@@ -410,20 +533,20 @@ def main() -> None:
             key=lambda x: x[1])[:5]
         d = EN_OUT / en_slug
         d.mkdir(parents=True, exist_ok=True)
-        (d / "index.html").write_text(render_en(s, slug, en_slug, aggs, near_en))
+        emit(d / "index.html", f"{SITE}/en/eki/{en_slug}/",
+             render_en(s, slug, en_slug, aggs, near_en))
         urls_en.append(f"{SITE}/en/eki/{en_slug}/")
         en_index_items.append(f'<li><a href="{en_slug}/">{en_name(en_slug)} Station</a></li>')
-    (EN_OUT / "index.html").write_text(render_en_index(en_index_items))
-    (ROOT / "web" / "llms.txt").write_text(LLMS_TXT)
-    # sitemap: 日本語slugは%エンコード(仕様準拠)。ルート直下とeki/配下の両方に置く
-    # (GSCにはルート版を登録。eki/版は旧登録・robots互換のため残す)
-    encoded = [f"{SITE}/"] + [f"{SITE}/pages/eki/{quote(slug)}/" for slug in
-                              (u.removeprefix(f"{SITE}/pages/eki/").rstrip("/") for u in urls)]
-    encoded += [f"{SITE}/en/eki/"] + urls_en
-    sitemap_body = "\n".join(encoded) + "\n"
-    (OUT / "sitemap.txt").write_text(sitemap_body)
-    (ROOT / "web" / "sitemap.txt").write_text(sitemap_body)
-    (OUT / "index.html").write_text(f"""<!DOCTYPE html>
+    emit(EN_OUT / "index.html", f"{SITE}/en/eki/", render_en_index(en_index_items))
+    # /en/ の入口(これが無いと英語面はハブしかなく、ツール本体の説明が英語で読めない)
+    (ROOT / "web" / "en").mkdir(parents=True, exist_ok=True)
+    emit(ROOT / "web" / "en" / "index.html", f"{SITE}/en/",
+         render_en_landing(len(urls_en), len(urls)))
+    (ROOT / "web" / "llms.txt").write_text(llms_txt(len(urls), len(urls_en)))
+    # トップは手書きページなので、本文ハッシュだけ台帳に載せる(lastmodの対象にする)
+    top_html = (ROOT / "web" / "index.html").read_text()
+    hashes[f"{SITE}/"] = hashlib.sha1(top_html.encode()).hexdigest()[:12]
+    emit(OUT / "index.html", f"{SITE}/pages/eki/", f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="utf-8">
@@ -446,7 +569,27 @@ ul{{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fil
 {ANALYTICS}
 </body>
 </html>""")
-    print(f"done: {len(urls)} ja pages -> {OUT}, {len(urls_en)} en pages -> {EN_OUT}")
+    # sitemap: 日本語slugは%エンコード(仕様準拠)。ルート直下とeki/配下の両方に置く
+    # (GSCにはルート版を登録。eki/版は旧登録・robots互換のため残す)
+    encoded = [f"{SITE}/", f"{SITE}/en/", f"{SITE}/pages/eki/"]
+    encoded += [f"{SITE}/pages/eki/{quote(slug)}/" for slug in
+                (u.removeprefix(f"{SITE}/pages/eki/").rstrip("/") for u in urls)]
+    encoded += [f"{SITE}/en/eki/"] + urls_en
+    if args.sample:
+        # 5駅だけのsitemap/lastmod台帳を書くと本番の索引情報を壊すので、レビュー時は触らない
+        print(f"sample: sitemap/robots/lastmodは更新しない({len(encoded)} urls)")
+    else:
+        sitemap_body = "\n".join(encoded) + "\n"
+        (OUT / "sitemap.txt").write_text(sitemap_body)
+        (ROOT / "web" / "sitemap.txt").write_text(sitemap_body)
+        # XML版: lastmod付き。txt版は既にGSCへ送信済みなので消さず両方置く
+        lastmods = stamp_lastmod({u: hashes[u] for u in encoded}, args.date)
+        (ROOT / "web" / "sitemap.xml").write_text(sitemap_xml(lastmods))
+        (ROOT / "web" / "robots.txt").write_text(
+            "User-agent: *\nAllow: /\n\n"
+            f"Sitemap: {SITE}/sitemap.xml\nSitemap: {SITE}/sitemap.txt\n")
+    print(f"done: {len(urls)} ja pages -> {OUT}, {len(urls_en)} en pages -> {EN_OUT}, "
+          f"sitemap {len(encoded)} urls")
 
 
 if __name__ == "__main__":

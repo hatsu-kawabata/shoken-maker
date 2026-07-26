@@ -12,12 +12,13 @@ a cafe / salon / clinic in Japan".
 ## Tool
 
 - [Interactive map (Japanese UI)](https://shoken-maker.vercel.app/): draw a circle anywhere in Japan, radius 500m–3km
+- [English overview of the tool and the data](https://shoken-maker.vercel.app/en/)
 
 ## Station data pages
 
-- [駅別の商圏人口一覧 (Japanese, ~2,000 stations)](https://shoken-maker.vercel.app/pages/eki/)
-- [Station demographics in English (200 busiest stations)](https://shoken-maker.vercel.app/en/eki/)
-- Full URL list: [sitemap](https://shoken-maker.vercel.app/sitemap.txt)
+- [駅別の商圏人口一覧 (Japanese, 1,995 stations)](https://shoken-maker.vercel.app/pages/eki/)
+- [Station demographics in English (1,979 stations)](https://shoken-maker.vercel.app/en/eki/)
+- Full URL list: [sitemap](https://shoken-maker.vercel.app/sitemap.xml)
 
 ## Data & method
 

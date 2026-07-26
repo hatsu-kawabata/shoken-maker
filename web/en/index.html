@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shoken Maker — Free Trade-Area Population Data for Japan (2020 Census)</title>
+<meta name="description" content="Free, no-signup trade-area analysis for Japan. Draw a circle on the map and get the population, households and age structure inside it, from the official 2020 Census 500m grid. Plus English demographic pages for 1,979 train stations.">
+<link rel="canonical" href="https://shoken-maker.vercel.app/en/">
+<link rel="alternate" hreflang="ja" href="https://shoken-maker.vercel.app/">
+<link rel="alternate" hreflang="en" href="https://shoken-maker.vercel.app/en/">
+<link rel="alternate" hreflang="x-default" href="https://shoken-maker.vercel.app/">
+<style>
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#0b0b0b;background:#fcfcfb;max-width:720px;margin:0 auto;padding:20px 16px;line-height:1.7}
+h1{font-size:23px}h2{font-size:16px;margin-top:28px}
+table{border-collapse:collapse;width:100%;font-size:14px}
+td,th{border-bottom:1px solid #e1e0d9;padding:8px 10px;text-align:left}
+.cta{display:inline-block;background:#2a78d6;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;margin:14px 0}
+.muted{color:#898781;font-size:12px}
+ul{padding-left:20px}
+</style>
+</head>
+<body>
+<h1>How many people live within 1&nbsp;km of any point in Japan?</h1>
+<p>Shoken Maker is a free, no-signup tool that answers that. Draw a circle anywhere on a map of
+Japan (radius 500&nbsp;m–3&nbsp;km) and it returns the <strong>residential population, number of
+households, gender split and 5-year age structure</strong> inside the circle — computed from the
+official <strong>2020 Population Census 500&nbsp;m grid</strong> published by the Statistics Bureau
+of Japan (e-Stat).</p>
+<a class="cta" href="https://shoken-maker.vercel.app/">Open the map tool →</a>
+<p class="muted">The tool's interface is in Japanese, but the circle and the numbers work without
+reading it: click the map, drag the radius slider, read the table.</p>
+<h2>Station demographics in English</h2>
+<p>Pre-computed pages for <strong>1,979 train stations</strong>, each with population and age
+structure at 500&nbsp;m / 1&nbsp;km / 3&nbsp;km, a population pyramid and nearby stations.</p>
+<ul>
+<li><a href="https://shoken-maker.vercel.app/en/eki/">Browse all 1,979 stations (English)</a></li>
+<li><a href="https://shoken-maker.vercel.app/en/eki/shinjuku/">Shinjuku</a> ·
+    <a href="https://shoken-maker.vercel.app/en/eki/shibuya/">Shibuya</a> ·
+    <a href="https://shoken-maker.vercel.app/en/eki/umeda/">Umeda</a> ·
+    <a href="https://shoken-maker.vercel.app/en/eki/hakata/">Hakata</a> ·
+    <a href="https://shoken-maker.vercel.app/en/eki/sapporo/">Sapporo</a></li>
+<li><a href="https://shoken-maker.vercel.app/pages/eki/">Japanese station index (1,995 stations)</a></li>
+</ul>
+<h2>What the data is — and is not</h2>
+<table>
+<tr><th>Figure</th><th>Meaning</th></tr>
+<tr><td>Population</td><td>Residential (nighttime) population — where people <em>live</em>, not daytime/worker population</td></tr>
+<tr><td>Households</td><td>Census households whose dwelling falls in the grid cells inside the circle</td></tr>
+<tr><td>Average age</td><td>From 5-year bands; central Tokyo/Osaka has a high share of unreported ages, so bands may not sum to the total</td></tr>
+<tr><td>Vintage</td><td>2020 Census (the most recent confirmed figures; the next census is 2025)</td></tr>
+</table>
+<p>Grid cells are counted when their centroid falls inside the circle, so a single 500&nbsp;m cell is
+either fully in or fully out. At a 500&nbsp;m radius that granularity matters; at 1&nbsp;km and above
+the error averages out.</p>
+<h2>Why use census grid data instead of a population API</h2>
+<p>Japanese census figures are the ones banks and landlords accept in loan applications and
+store-opening plans. The 500&nbsp;m grid is the finest official geography published for the whole
+country, and it is free to redistribute with attribution — which is why this site can be free and
+open source.</p>
+<div style="border:1px solid #e1e0d9;border-radius:10px;padding:14px 16px;margin:24px 0;background:#fff">
+<p style="margin:0 0 6px"><strong>📋 Opening a business in Japan?</strong></p>
+<p style="margin:0 0 10px;font-size:14px">We're preparing custom trade-area reports — demographics
+and market context around a specific location you're considering. Join the free early-access list
+(about 1 minute).</p>
+<a class="cta" style="margin:0" href="https://docs.google.com/forms/d/e/1FAIpQLSeKpROMSuAETstOQ4To5JsIJ17XZnFKTP0l522PrBbISxDLSg/viewform">Join the early-access list →</a>
+</div>
+<p class="muted">Source: 2020 Population Census 500m grid (Statistics Bureau of Japan, e-Stat) and
+MLIT National Land Numerical Information S12 (station locations &amp; ridership). Processed and
+published by Shoken Maker. <a href="https://github.com/hatsu-kawabata/shoken-maker">Open source (MIT)</a> ·
+<a href="https://shoken-maker.vercel.app/llms.txt">llms.txt</a></p>
+<script>
+if (/\.vercel\.app$/.test(location.hostname)) {
+  var s = document.createElement("script");
+  s.defer = true;
+  s.src = "/_vercel/insights/script.js";
+  document.head.appendChild(s);
+}
+</script>
+</body>
+</html>
