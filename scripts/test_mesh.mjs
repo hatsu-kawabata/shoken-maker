@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { meshCentroid, primaryMeshesInBBox, circleBBox, aggregateCircle, bandSum, DLAT, DLON, N_BANDS } from "../web/mesh.js";
+import { INDUSTRIES, industryById, targetPopulation, targetShare } from "../web/industry.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 let fails = 0;
@@ -101,6 +102,36 @@ const cells5339 = load("5339");
   check("札幌駅1km圏", sap.pop > 15000 && sap.pop < 120000, `${sap.pop}人 平均${sap.meanAge?.toFixed(1)}歳`);
   const naha = aggregateCircle(load("3927"), 26.2124, 127.6809, 1000);
   check("那覇市中心1km圏", naha.pop > 10000 && naha.pop < 100000, `${naha.pop}人 平均${naha.meanAge?.toFixed(1)}歳`);
+}
+
+
+// ---- 業種別の主な客層(industry.js) ----
+{
+  // 定義の健全性: 範囲がバンド内に収まり、from<=to で、注記がある
+  const bad = INDUSTRIES.filter((i) => i.id).filter(
+    (i) => !(i.from >= 0 && i.to < N_BANDS && i.from <= i.to && i.target && i.note));
+  check("業種定義はすべて有効な年齢範囲と注記を持つ", bad.length === 0,
+    bad.map((i) => i.id).join(",") || `${INDUSTRIES.length - 1}業種`);
+  check("先頭は未選択(業種を選ばない状態が既定)", INDUSTRIES[0].id === "" && INDUSTRIES[0].from == null);
+  check("未知のidは未選択に落ちる", industryById("nope").id === "");
+}
+{
+  const a = aggregateCircle(cells5339, 35.68953, 139.69986, 1000);
+  const grocery = targetPopulation(a.bands, industryById("grocery"));
+  check("全年齢の業種はバンド和と一致する", grocery === bandSum(a.bands, 0, N_BANDS - 1), `${grocery}`);
+
+  const kids = targetPopulation(a.bands, industryById("kids"));
+  const kaigo = targetPopulation(a.bands, industryById("kaigo"));
+  const food = targetPopulation(a.bands, industryById("food"));
+  check("部分年齢の客層は全年齢より小さい", kids < grocery && kaigo < grocery && food < grocery,
+    `0-4歳${Math.round(kids)} / 75歳以上${Math.round(kaigo)} / 20-64歳${Math.round(food)} < 全年齢${Math.round(grocery)}`);
+  check("新宿は生産年齢が厚い(20〜64歳は0〜4歳の10倍超)", food > kids * 10,
+    `${Math.round(food)} vs ${Math.round(kids)}`);
+  check("客層の割合は0〜100%に収まる",
+    [kids, kaigo, food].every((t) => { const v = targetShare(t, a.pop); return v >= 0 && v <= 100; }),
+    `20-64歳=${targetShare(food, a.pop).toFixed(1)}%`);
+  check("総人口0なら割合はnull", targetShare(0, 0) === null);
+  check("業種未選択なら客層人口はnull", targetPopulation(a.bands, industryById("")) === null);
 }
 
 process.exit(fails ? 1 : 0);

@@ -1,4 +1,5 @@
 import { meshCentroid, primaryMeshesInBBox, circleBBox, aggregateCircle, bandSum, N_BANDS } from "./mesh.js";
+import { INDUSTRIES, industryById, targetPopulation, targetShare } from "./industry.js";
 
 const map = L.map("map").setView([35.681, 139.767], 13);
 L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png", {
@@ -26,7 +27,19 @@ const els = {
   maskNote: document.getElementById("maskNote"),
   missingNote: document.getElementById("missingNote"),
   meta: document.getElementById("meta"),
+  industry: document.getElementById("industry"),
+  targetTile: document.getElementById("targetTile"),
+  targetLabel: document.getElementById("targetLabel"),
+  targetPop: document.getElementById("targetPop"),
+  industryNote: document.getElementById("industryNote"),
 };
+
+for (const ind of INDUSTRIES) {
+  const o = document.createElement("option");
+  o.value = ind.id;
+  o.textContent = ind.label;
+  els.industry.append(o);
+}
 
 const COLOR = { A: "#2a78d6", B: "#4a3aa7" };
 
@@ -47,6 +60,8 @@ function applyUrlState() {
     els.radius.value = r;
     els.radiusOut.textContent = `${(r / 1000).toFixed(1)} km`;
   }
+  const ind = p.get("ind");
+  if (ind && INDUSTRIES.some((i) => i.id === ind)) els.industry.value = ind;
   map.setView([lat, lng], 14);
   setPoint("A", L.latLng(lat, lng));
   const lat2 = parseFloat(p.get("lat2")), lng2 = parseFloat(p.get("lng2"));
@@ -62,6 +77,7 @@ function syncUrl() {
   p.set("lat", centers.A.lat.toFixed(5));
   p.set("lng", centers.A.lng.toFixed(5));
   p.set("r", els.radius.value);
+  if (els.industry.value) p.set("ind", els.industry.value);
   if (compareMode && centers.B) {
     p.set("lat2", centers.B.lat.toFixed(5));
     p.set("lng2", centers.B.lng.toFixed(5));
@@ -111,7 +127,7 @@ const BAND_LABELS = ["0-4", "5-9", "10-14", "15-19", "20-24", "25-29", "30-34", 
   "40-44", "45-49", "50-54", "55-59", "60-64", "65-69", "70-74", "75-79", "80-84",
   "85-89", "90-94", "95+"];
 
-function renderPyramid(container, bands, total) {
+function renderPyramid(container, bands, total, hi = null) {
   container.replaceChildren();
   if (total <= 0) return;
   const maxPct = Math.max(0.1, ...bands.map((b) => Math.max(b.m, b.f) / total * 100));
@@ -119,7 +135,8 @@ function renderPyramid(container, bands, total) {
     const { m, f } = bands[i];
     const pm = (m / total) * 100, pf = (f / total) * 100;
     const row = document.createElement("div");
-    row.className = "pyr-row";
+    const inTarget = hi && i >= hi.from && i <= hi.to;
+    row.className = inTarget ? "pyr-row target" : "pyr-row";
     row.title = `${BAND_LABELS[i]}歳: 男 ${fmt(m)}人 / 女 ${fmt(f)}人`;
     row.innerHTML = `
       <div class="pyr-side"><div class="pyr-bar male" style="width:${(pm / maxPct) * 100}%"></div></div>
@@ -135,7 +152,21 @@ function renderSingle(agg) {
   els.hh.innerHTML = `${fmt(hh)}<span class="unit">世帯</span>`;
   els.mf.textContent = `${fmt(male)} / ${fmt(female)}`;
   els.meanAge.innerHTML = meanAge == null ? "–" : `${meanAge.toFixed(1)}<span class="unit">歳</span>`;
-  renderPyramid(els.pyramid, bands, total);
+
+  // 業種を選ぶと、総人口でなく主な客層の実数が出る（選ぶ理由が本人の側にある）
+  const ind = industryById(els.industry.value);
+  const t = targetPopulation(bands, ind);
+  els.targetTile.hidden = t == null;
+  els.industryNote.hidden = !ind.note;
+  if (t != null) {
+    const share = targetShare(t, total);
+    els.targetLabel.textContent = `${ind.label}の主な客層（${ind.target}）`;
+    els.targetPop.innerHTML = `${fmt(t)}<span class="unit">人</span>`
+      + (share == null ? "" : `<span class="unit"> / 全体の${share.toFixed(0)}%</span>`);
+  }
+  if (ind.note) els.industryNote.textContent = ind.note;
+
+  renderPyramid(els.pyramid, bands, total, t == null ? null : ind);
 }
 
 function renderCompare(aggA, aggB) {
@@ -329,6 +360,20 @@ document.addEventListener("click", (e) => {
 });
 
 let debounce = null;
+els.industry.addEventListener("change", () => {
+  recompute();
+  syncUrl();
+  // 業種はユーザーが自分の答えのために選ぶ入力なので、聞かずに観測できる
+  if (centers.A) {
+    window.va?.track?.("circle", {
+      industry: els.industry.value || "(none)",
+      radius: +els.radius.value,
+      lat1: Math.round(centers.A.lat * 100) / 100,
+      lng1: Math.round(centers.A.lng * 100) / 100,
+    });
+  }
+});
+
 els.radius.addEventListener("input", () => {
   els.radiusOut.textContent = `${(+els.radius.value / 1000).toFixed(1)} km`;
   for (const k of ["A", "B"]) if (circles[k]) circles[k].setRadius(+els.radius.value);
