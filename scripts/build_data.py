@@ -3,7 +3,11 @@
 
 入力(1次メッシュごと):
   T001141_{code}.zip — 2020国調その1: 総数・男女・世帯総数
-  T001173_{code}.zip — 2020国調5歳階級: 20階級(0-4..95+)×男女・平均年齢(無ければnull埋め)
+  T001192_{code}.zip — 2020国調5歳階級: 20階級(0-4..95+)×男女・平均年齢(無ければnull埋め)
+
+測地系は両方とも世界測地系JGD2011で揃えること。e-Statは同一調査・同一解像度でも
+JGD2000版とJGD2011版を並存させており、混ぜると同じメッシュコードがわずかに違う領域を指す。
+(2026-07-27まで5歳階級側にJGD2000版のT001173を使っており、T001141=JGD2011と混在していた)
 
 出力フォーマット(1行1セル、サイズ最小化のため配列):
   [KEY_CODE(9桁文字列), 総数, 男, 女, 世帯総数, 平均年齢, b0m, b0f, ..., b19m, b19f]
@@ -51,9 +55,9 @@ def build(code1: str) -> int:
     # T001141: col4=総数 5=男 6=女 37=世帯総数
     base = {r[0]: [val(r[i]) if i < len(r) else None for i in (4, 5, 6, 37)]
             for r in read_zip(RAW / f"T001141_{code1}.zip")}
-    # T001173: col4-6=総数(検算用) 7+3i/8+3i/9+3i=バンドi総/男/女 67=平均年齢
+    # T001192: col4-6=総数(検算用) 7+3i/8+3i/9+3i=バンドi総/男/女 67=平均年齢
     ages: dict[str, list] = {}
-    age_zip = RAW / f"T001173_{code1}.zip"
+    age_zip = RAW / f"T001192_{code1}.zip"
     if age_zip.exists():
         for r in read_zip(age_zip):
             bands = []
@@ -86,12 +90,12 @@ def main() -> None:
     n_ages = 0
     for code1 in codes:
         n = build(code1)
-        has_age = (RAW / f"T001173_{code1}.zip").exists()
+        has_age = (RAW / f"T001192_{code1}.zip").exists()
         n_ages += has_age
         print(f"{code1}: {n} cells{'' if has_age else ' (年齢詳細なし)'}")
     manifest = {
         "format": 2,
-        "source": "2020年国勢調査(e-Stat 統計GIS) T001141+T001173",
+        "source": "2020年国勢調査(e-Stat 統計GIS) T001141+T001192 (ともにJGD2011)",
         "bands": ["0-4", "5-9", "10-14", "15-19", "20-24", "25-29", "30-34", "35-39",
                   "40-44", "45-49", "50-54", "55-59", "60-64", "65-69", "70-74",
                   "75-79", "80-84", "85-89", "90-94", "95+"],
