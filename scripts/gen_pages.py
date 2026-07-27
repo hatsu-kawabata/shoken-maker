@@ -590,6 +590,10 @@ ul{{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fil
             f"Sitemap: {SITE}/sitemap.xml\nSitemap: {SITE}/sitemap.txt\n")
     print(f"done: {len(urls)} ja pages -> {OUT}, {len(urls_en)} en pages -> {EN_OUT}, "
           f"sitemap {len(encoded)} urls")
+    if not args.sample:
+        # publish-and-ping: デプロイ後に本文が変わったURLだけIndexNowへ通知する
+        print("next: cd web && vercel --prod --yes && "
+              "python3 scripts/indexnow.py --changed")
 
 
 if __name__ == "__main__":
