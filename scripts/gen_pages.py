@@ -340,6 +340,128 @@ the average age is {mean_age}, and {senior_pct:.1f}% of residents are 65 or olde
 </html>"""
 
 
+# ランキング面(施策4 / docs/spec_index_yield_v0.md)。
+# 駅ページ1枚は「その駅を知っている人」しか探さないが、ランキングは
+# 「どの駅が◯◯か」という、駅名を知らない側の検索に答えられる＝別種の入口になる。
+RANKINGS = [
+    {"slug": "population", "key": "pop", "desc": True, "unit": "人", "en_unit": "",
+     "h1": "駅の商圏人口ランキング（半径1km・常住人口）",
+     "lead": "半径1km圏の常住人口が多い駅を、2020年国勢調査の500mメッシュから集計して並べました。",
+     "col": "半径1km圏人口",
+     "en_h1": "Japan Station Trade-Area Population Ranking (1 km radius)",
+     "en_lead": "Stations ranked by residential population within a 1 km radius, "
+                "aggregated from the 500m grid of the 2020 Census of Japan.",
+     "en_col": "Residents within 1 km"},
+    {"slug": "senior", "key": "senior_pct", "desc": True, "unit": "%", "en_unit": "%",
+     "h1": "65歳以上の比率が高い駅ランキング（半径1km）",
+     "lead": "半径1km圏の常住人口に占める65歳以上の比率が高い駅です。"
+             "高齢層向けの商材・サービスの立地検討に使えます。",
+     "col": "65歳以上の比率",
+     "en_h1": "Japanese Stations with the Highest Share of Residents Aged 65+",
+     "en_lead": "Stations ranked by the share of residents aged 65 or older "
+                "within a 1 km radius.",
+     "en_col": "Share aged 65+"},
+    {"slug": "young", "key": "senior_pct", "desc": False, "unit": "%", "en_unit": "%",
+     "h1": "65歳以上の比率が低い駅ランキング（半径1km）",
+     "lead": "半径1km圏で65歳以上の比率が低い＝現役世代が集中している駅です。",
+     "col": "65歳以上の比率",
+     "en_h1": "Japanese Stations with the Lowest Share of Residents Aged 65+",
+     "en_lead": "Stations where residents aged 65 or older make up the smallest share "
+                "within a 1 km radius — a working-age concentration.",
+     "en_col": "Share aged 65+"},
+]
+RANK_TOP = 100
+RANK_STYLE = """body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#0b0b0b;background:#fcfcfb;max-width:720px;margin:0 auto;padding:20px 16px;line-height:1.7}
+h1{font-size:22px}h2{font-size:16px;margin-top:28px}
+table{border-collapse:collapse;width:100%;font-size:14px}
+td,th{border-bottom:1px solid #e1e0d9;padding:8px 10px;text-align:right}
+td:first-child,th:first-child{text-align:left}
+.muted{color:#898781;font-size:12px}
+.cta{display:inline-block;background:#2a78d6;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;margin:14px 0}"""
+
+
+def rank_rows(spec: dict, records: dict, names: dict, top: int) -> list[tuple]:
+    """順位表の行(順位, slug, 表示名, 値)を返す。値の同順は slug で安定化する。"""
+    ordered = sorted(records.values(),
+                     key=lambda r: (-r[spec["key"]] if spec["desc"] else r[spec["key"]],
+                                    r["slug"]))
+    return [(i + 1, r["slug"], names[r["slug"]], r[spec["key"]])
+            for i, r in enumerate(ordered[:top])]
+
+
+def fmt_val(v: float, unit: str) -> str:
+    return f"{v:,.1f}{unit}" if unit == "%" else f"{fmt(int(v))}{unit}"
+
+
+def render_ranking(spec: dict, rows: list[tuple], n_total: int) -> str:
+    body = "".join(
+        f'<tr><td>{i}</td><td><a href="../../eki/{quote(slug)}/">{name}駅</a></td>'
+        f'<td>{fmt_val(v, spec["unit"])}</td></tr>'
+        for i, slug, name, v in rows)
+    return f"""<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{spec["h1"]} 上位{len(rows)}駅 | 商圏メーカー</title>
+<meta name="description" content="{spec["lead"]}全国{n_total:,}駅を集計した上位{len(rows)}駅。2020年国勢調査500mメッシュによる無料の商圏データ。">
+<link rel="canonical" href="{SITE}/pages/ranking/{spec["slug"]}/">
+<style>
+{RANK_STYLE}
+</style>
+</head>
+<body>
+<p class="muted"><a href="{SITE}/">商圏メーカー</a> › <a href="{SITE}/pages/eki/">駅一覧</a> › ランキング</p>
+<h1>{spec["h1"]}</h1>
+<p>{spec["lead"]}対象は乗降客数の多い全国{n_total:,}駅です。</p>
+<a class="cta" href="{SITE}/">地図で任意の場所の商圏を見る →</a>
+<table>
+<tr><th>順位</th><th>駅</th><th>{spec["col"]}</th></tr>
+{body}
+</table>
+<h2>ほかのランキング</h2>
+<ul>{"".join(f'<li><a href="../{s["slug"]}/">{s["h1"]}</a></li>' for s in RANKINGS if s["slug"] != spec["slug"])}</ul>
+<p class="muted">出典: 総務省統計局「令和2年国勢調査」500mメッシュ（e-Stat 統計GIS）・国土数値情報 駅別乗降客数(S12)を加工して作成。
+数値は常住（夜間）人口の概算です。<a href="https://github.com/hatsu-kawabata/shoken-maker">オープンソース(MIT)</a></p>
+{ANALYTICS}
+</body>
+</html>"""
+
+
+def render_ranking_en(spec: dict, rows: list[tuple], n_total: int, en_of: dict) -> str:
+    body = "".join(
+        f'<tr><td>{i}</td><td><a href="../../eki/{en_of[slug]}/">{en_name(en_of[slug])} Station</a></td>'
+        f'<td>{fmt_val(v, spec["en_unit"])}</td></tr>'
+        for i, slug, _, v in rows if slug in en_of)
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{spec["en_h1"]} — Top {len(rows)} | Shoken Maker</title>
+<meta name="description" content="{spec["en_lead"]} Top {len(rows)} of {n_total:,} major stations. Free data from the 2020 Census of Japan.">
+<link rel="canonical" href="{SITE}/en/ranking/{spec["slug"]}/">
+<style>
+{RANK_STYLE}
+</style>
+</head>
+<body>
+<p class="muted"><a href="{SITE}/en/">Shoken Maker</a> › <a href="{SITE}/en/eki/">Stations</a> › Rankings</p>
+<h1>{spec["en_h1"]}</h1>
+<p>{spec["en_lead"]} Covering the {n_total:,} busiest stations in Japan.</p>
+<a class="cta" href="{SITE}/">Explore any location on the map →</a>
+<table>
+<tr><th>#</th><th>Station</th><th>{spec["en_col"]}</th></tr>
+{body}
+</table>
+<h2>Other rankings</h2>
+<ul>{"".join(f'<li><a href="../{s["slug"]}/">{s["en_h1"]}</a></li>' for s in RANKINGS if s["slug"] != spec["slug"])}</ul>
+<p class="muted">Source: 2020 Population Census 500m grid (Statistics Bureau of Japan, e-Stat) and MLIT station ridership data (S12). Figures are approximate residential (nighttime) population. <a href="https://github.com/hatsu-kawabata/shoken-maker">Open source (MIT)</a></p>
+{ANALYTICS}
+</body>
+</html>"""
+
+
 def render_en_index(items: list[str]) -> str:
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -362,6 +484,9 @@ ul{{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fil
 from the 2020 Population Census 500m grid. Or draw your own circle on the
 <a href="{SITE}/">interactive map</a> (interface in Japanese) — see the
 <a href="{SITE}/en/">English overview</a> for what the data means.</p>
+<h2>Browse by ranking</h2>
+<ul style="display:block">{"".join(f'<li><a href="{SITE}/en/ranking/{s["slug"]}/">{s["en_h1"]}</a></li>' for s in RANKINGS)}</ul>
+<h2>All stations</h2>
 <ul>{"".join(items)}</ul>
 <p class="muted">Source: 2020 Population Census 500m grid (Statistics Bureau of Japan, e-Stat) and MLIT station data (S12). <a href="https://github.com/hatsu-kawabata/shoken-maker">Open source (MIT)</a></p>
 {ANALYTICS}
@@ -453,8 +578,15 @@ def stamp_lastmod(hashes: dict[str, str], build_date: str) -> dict[str, str]:
                                else build_date)}
            for url, h in hashes.items()}
     MANIFEST.write_text(json.dumps(cur, ensure_ascii=False, sort_keys=True, indent=0) + "\n")
-    changed = sum(1 for u, v in cur.items() if v["d"] == build_date)
-    print(f"lastmod: {len(cur)} urls / 本文が変わった {changed}")
+    # 「今日の日付が付いた数」と「前回ビルドから実際にハッシュが変わった数」は別物。
+    # 同じ日に2回ビルドすると前者は前回分を含んだままになり、--changed が
+    # 変わっていないURLまで再通知してしまう(実際に踏んだ)。両方を出して取り違えを防ぐ
+    dated = sum(1 for v in cur.values() if v["d"] == build_date)
+    diff = [u for u, v in cur.items() if prev.get(u, {}).get("h") != v["h"]]
+    print(f"lastmod: {len(cur)} urls / 日付={build_date} {dated} / "
+          f"前回ビルドからの実差分 {len(diff)}")
+    if diff and len(diff) <= 20:
+        print("  実差分: " + ", ".join(u.removeprefix(SITE) for u in diff))
     return {u: v["d"] for u, v in cur.items()}
 
 
@@ -609,6 +741,28 @@ def main() -> None:
         urls_en.append(f"{SITE}/en/eki/{en_slug}/")
         en_index_items.append(f'<li><a href="{en_slug}/">{en_name(en_slug)} Station</a></li>')
     emit(EN_OUT / "index.html", f"{SITE}/en/eki/", render_en_index(en_index_items))
+
+    # 施策4: ランキング面。駅名を知らない側の検索(「駅 人口 ランキング」等)の入口になる。
+    # 日英とも作るのは、実験01bが日英の索引率の比較なので面の非対称を作らないため
+    names = {slug: s["n"] for s, slug, _ in built}
+    en_of = {slug: en_slug for _, slug, en_slug, _, _ in en_pages}
+    rank_dir = ROOT / "web" / "pages" / "ranking"
+    rank_dir_en = ROOT / "web" / "en" / "ranking"
+    # urls/urls_en とは別に持つ。あちらは駅ページ専用の数(llms.txt・一覧の件数表示)であり、
+    # sitemapを組むときに /pages/eki/ 前提のslug加工を通すため、混ぜるとURLが壊れる
+    urls_rank, urls_rank_en = [], []
+    for spec in RANKINGS:
+        rows = rank_rows(spec, records, names, RANK_TOP)
+        d = rank_dir / spec["slug"]
+        d.mkdir(parents=True, exist_ok=True)
+        emit(d / "index.html", f"{SITE}/pages/ranking/{spec['slug']}/",
+             render_ranking(spec, rows, len(records)))
+        urls_rank.append(f"{SITE}/pages/ranking/{spec['slug']}/")
+        d_en = rank_dir_en / spec["slug"]
+        d_en.mkdir(parents=True, exist_ok=True)
+        emit(d_en / "index.html", f"{SITE}/en/ranking/{spec['slug']}/",
+             render_ranking_en(spec, rows, len(records), en_of))
+        urls_rank_en.append(f"{SITE}/en/ranking/{spec['slug']}/")
     # /en/ の入口(これが無いと英語面はハブしかなく、ツール本体の説明が英語で読めない)
     (ROOT / "web" / "en").mkdir(parents=True, exist_ok=True)
     emit(ROOT / "web" / "en" / "index.html", f"{SITE}/en/",
@@ -635,6 +789,8 @@ ul{{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fil
 <p class="muted"><a href="{SITE}/">商圏メーカー</a> › 駅一覧</p>
 <h1>駅別の商圏人口データ（乗降客数順）</h1>
 <p>地図で自由に円を描いて調べるには<a href="{SITE}/">商圏メーカー本体</a>へ。</p>
+<h2>ランキングから探す</h2>
+<ul style="display:block">{"".join(f'<li><a href="{SITE}/pages/ranking/{s["slug"]}/">{s["h1"]}</a></li>' for s in RANKINGS)}</ul>
 <ul>{"".join(index_items)}</ul>
 <p class="muted">出典: 総務省統計局「令和2年国勢調査」500mメッシュ（e-Stat 統計GIS）・国土数値情報 駅別乗降客数(S12)を加工して作成。</p>
 {ANALYTICS}
@@ -645,7 +801,8 @@ ul{{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fil
     encoded = [f"{SITE}/", f"{SITE}/en/", f"{SITE}/pages/eki/"]
     encoded += [f"{SITE}/pages/eki/{quote(slug)}/" for slug in
                 (u.removeprefix(f"{SITE}/pages/eki/").rstrip("/") for u in urls)]
-    encoded += [f"{SITE}/en/eki/"] + urls_en
+    encoded += urls_rank
+    encoded += [f"{SITE}/en/eki/"] + urls_en + urls_rank_en
     if args.sample:
         # 5駅だけのsitemap/lastmod台帳を書くと本番の索引情報を壊すので、レビュー時は触らない
         print(f"sample: sitemap/robots/lastmodは更新しない({len(encoded)} urls)")

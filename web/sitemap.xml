@@ -2,7 +2,7 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 <url><loc>https://shoken-maker.vercel.app/</loc><lastmod>2026-07-29</lastmod></url>
 <url><loc>https://shoken-maker.vercel.app/en/</loc><lastmod>2026-07-26</lastmod></url>
-<url><loc>https://shoken-maker.vercel.app/pages/eki/</loc><lastmod>2026-07-26</lastmod></url>
+<url><loc>https://shoken-maker.vercel.app/pages/eki/</loc><lastmod>2026-07-29</lastmod></url>
 <url><loc>https://shoken-maker.vercel.app/pages/eki/%E6%96%B0%E5%AE%BF/</loc><lastmod>2026-07-29</lastmod></url>
 <url><loc>https://shoken-maker.vercel.app/pages/eki/%E6%B1%A0%E8%A2%8B/</loc><lastmod>2026-07-29</lastmod></url>
 <url><loc>https://shoken-maker.vercel.app/pages/eki/%E6%B8%8B%E8%B0%B7/</loc><lastmod>2026-07-29</lastmod></url>
@@ -1998,7 +1998,10 @@
 <url><loc>https://shoken-maker.vercel.app/pages/eki/%E5%90%8D%E5%BC%B5/</loc><lastmod>2026-07-29</lastmod></url>
 <url><loc>https://shoken-maker.vercel.app/pages/eki/%E8%92%B2%E7%94%9F%E5%9B%9B%E4%B8%81%E7%9B%AE/</loc><lastmod>2026-07-29</lastmod></url>
 <url><loc>https://shoken-maker.vercel.app/pages/eki/%E5%B0%8F%E5%B7%9D%E7%94%BA-2/</loc><lastmod>2026-07-29</lastmod></url>
-<url><loc>https://shoken-maker.vercel.app/en/eki/</loc><lastmod>2026-07-26</lastmod></url>
+<url><loc>https://shoken-maker.vercel.app/pages/ranking/population/</loc><lastmod>2026-07-29</lastmod></url>
+<url><loc>https://shoken-maker.vercel.app/pages/ranking/senior/</loc><lastmod>2026-07-29</lastmod></url>
+<url><loc>https://shoken-maker.vercel.app/pages/ranking/young/</loc><lastmod>2026-07-29</lastmod></url>
+<url><loc>https://shoken-maker.vercel.app/en/eki/</loc><lastmod>2026-07-29</lastmod></url>
 <url><loc>https://shoken-maker.vercel.app/en/eki/shinjuku/</loc><lastmod>2026-07-29</lastmod></url>
 <url><loc>https://shoken-maker.vercel.app/en/eki/ikebukuro/</loc><lastmod>2026-07-29</lastmod></url>
 <url><loc>https://shoken-maker.vercel.app/en/eki/shibuya/</loc><lastmod>2026-07-29</lastmod></url>
@@ -3978,4 +3981,7 @@
 <url><loc>https://shoken-maker.vercel.app/en/eki/nabari/</loc><lastmod>2026-07-29</lastmod></url>
 <url><loc>https://shoken-maker.vercel.app/en/eki/gamo-yonchome/</loc><lastmod>2026-07-29</lastmod></url>
 <url><loc>https://shoken-maker.vercel.app/en/eki/ogawamachi-2/</loc><lastmod>2026-07-29</lastmod></url>
+<url><loc>https://shoken-maker.vercel.app/en/ranking/population/</loc><lastmod>2026-07-29</lastmod></url>
+<url><loc>https://shoken-maker.vercel.app/en/ranking/senior/</loc><lastmod>2026-07-29</lastmod></url>
+<url><loc>https://shoken-maker.vercel.app/en/ranking/young/</loc><lastmod>2026-07-29</lastmod></url>
 </urlset>

@@ -10,7 +10,12 @@ sitemapは3日以上『取得できませんでした』のまま)。IndexNowは
 使い方:
   python3 scripts/indexnow.py --changed    # lastmod台帳で今日変わったURLだけ通知
   python3 scripts/indexnow.py --all        # sitemap.xmlの全URLを通知
+  python3 scripts/indexnow.py --only /pages/ranking/senior/ ...  # 指定URLだけ通知
   python3 scripts/indexnow.py --all --dry-run
+
+--only がある理由: --changed は台帳の「最新日付」でURLを選ぶので、同じ日に2回
+ビルドすると1回目に通知済みのURLまで再び対象に入る。実際に変わったのが数本の
+ときは、変わった分だけを明示して送る(不要な再通知はスパム信号になりうる)。
 """
 import argparse
 import json
@@ -87,12 +92,17 @@ def main() -> None:
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--all", action="store_true", help="sitemap.xmlの全URL")
     g.add_argument("--changed", action="store_true", help="lastmod台帳で最新日付のURLのみ")
+    g.add_argument("--only", nargs="+", metavar="PATH",
+                   help="指定したパス(またはURL)だけ通知する")
     ap.add_argument("--date", help="--changedで対象にする日付(既定=台帳の最新日)")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
     p = write_key_file()
-    urls = sitemap_urls() if args.all else changed_urls(args.date)
+    if args.only:
+        urls = [u if u.startswith("http") else f"{SITE}{u}" for u in args.only]
+    else:
+        urls = sitemap_urls() if args.all else changed_urls(args.date)
     print(f"鍵ファイル: {p.relative_to(ROOT)} / 通知対象 {len(urls)} URL")
     if not urls:
         print("対象なし")
