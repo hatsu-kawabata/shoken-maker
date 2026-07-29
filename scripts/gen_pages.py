@@ -13,8 +13,13 @@ import datetime
 import hashlib
 import json
 import math
+import sys
 from pathlib import Path
 from urllib.parse import quote
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from distinct import (corpus_stats, features_en, features_ja,  # noqa: E402
+                      is_distinctive, title_suffix_en, title_suffix_ja)
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "web" / "data"
@@ -164,7 +169,9 @@ def band_sum(bands, lo, hi) -> int:
     return sum(m + f for m, f in bands[lo:hi + 1])
 
 
-def render(st, slug: str, aggs: dict, nearby: list, en_slug: str | None = None) -> str:
+def render(st, slug: str, aggs: dict, nearby: list, en_slug: str | None = None,
+           feats: list[str] | None = None, tsuffix: str = "",
+           ambiguous: bool = False) -> str:
     name = st["n"]
     lines = "・".join(st["l"][:4]) + ("ほか" if len(st["l"]) > 4 else "")
     a1 = aggs[1000]
@@ -184,13 +191,26 @@ def render(st, slug: str, aggs: dict, nearby: list, en_slug: str | None = None) 
         for nst, nslug, dist in nearby
     )
     tool = f'{SITE}/?lat={st["la"]}&lng={st["lo"]}&r=1000'
+    # 特徴文はコーパス全体からしか出ない情報なので、要約(description)にも先頭1本を回す
+    feats = feats or []
+    feat_html = ("".join(f"<li>{x}</li>" for x in feats[1:])
+                 if len(feats) > 1 else "")
+    feat_block = (f'<h2>全国の駅の中での位置づけ</h2>\n<ul>{feat_html}</ul>'
+                  if feat_html else "")
+    lead = feats[0] if feats else ""
+    # タイトル: 特徴が立つ駅は半径の羅列より特徴を出す(同型タイトルの解消)。
+    # 同名駅(京橋・大久保・県庁前など)は路線名で区別する。これを入れないと
+    # 別の駅のページが完全に同じタイトルになり、重複ページとして扱われる
+    disamb = f"（{st['l'][0]}）" if ambiguous and st.get("l") else ""
+    title = (f"{name}駅{disamb}の商圏人口・年齢構成{tsuffix} | 商圏メーカー" if tsuffix else
+             f"{name}駅{disamb}の商圏人口・年齢構成（半径500m/1km/3km）| 商圏メーカー")
     return f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{name}駅の商圏人口・年齢構成（半径500m/1km/3km）| 商圏メーカー</title>
-<meta name="description" content="{name}駅（{lines}）の商圏人口: 半径1km圏の常住人口は約{fmt(a1['pop'])}人・{fmt(a1['hh'])}世帯、平均年齢{mean_age}。2020年国勢調査500mメッシュによる無料の商圏分析。">
+<title>{title}</title>
+<meta name="description" content="{name}駅（{lines}）の商圏人口: 半径1km圏の常住人口は約{fmt(a1['pop'])}人・{fmt(a1['hh'])}世帯、平均年齢{mean_age}。{feats[1] if len(feats) > 1 else ''}2020年国勢調査500mメッシュによる無料の商圏分析。">
 <link rel="canonical" href="{SITE}/pages/eki/{slug}/">
 {hreflang(slug, en_slug) if en_slug else ""}
 <style>
@@ -210,8 +230,9 @@ ul{{padding-left:20px}}
 <h1>{name}駅の商圏人口・年齢構成</h1>
 <p>{name}駅（{lines}）周辺の常住人口を2020年国勢調査の500mメッシュ統計から集計しました。{pax}
 半径1km圏の人口は<strong>約{fmt(a1["pop"])}人・{fmt(a1["hh"])}世帯</strong>、平均年齢は{mean_age}、
-65歳以上の比率は{senior_pct:.1f}%です。</p>
+65歳以上の比率は{senior_pct:.1f}%です。{lead}</p>
 <a class="cta" href="{tool}">地図で円を動かして詳しく見る →</a>
+{feat_block}
 <h2>半径別の商圏規模</h2>
 <table>
 <tr><th>範囲</th><th>常住人口</th><th>世帯数</th><th>平均年齢</th></tr>
@@ -234,7 +255,9 @@ ul{{padding-left:20px}}
 </html>"""
 
 
-def render_en(st, slug: str, en_slug: str, aggs: dict, nearby_en: list) -> str:
+def render_en(st, slug: str, en_slug: str, aggs: dict, nearby_en: list,
+              feats: list[str] | None = None, tsuffix: str = "",
+              ambiguous: bool = False) -> str:
     name = en_name(en_slug)
     a1 = aggs[1000]
     senior = band_sum(a1["bands"], 13, 19)
@@ -253,13 +276,25 @@ def render_en(st, slug: str, en_slug: str, aggs: dict, nearby_en: list) -> str:
         for nslug, dist in nearby_en
     )
     tool = f'{SITE}/?lat={st["la"]}&lng={st["lo"]}&r=1000'
+    feats = feats or []
+    feat_html = ("".join(f"<li>{x}</li>" for x in feats[1:])
+                 if len(feats) > 1 else "")
+    feat_block = (f'<h2>How this station compares nationwide</h2>\n<ul>{feat_html}</ul>'
+                  if feat_html else "")
+    lead = f" {feats[0]}" if feats else ""
+    # 同名駅(Okubo・Kyobashi など)の区別。日本語面は路線名で分けるが、英語の読者に
+    # 日本語の路線名を出しても手がかりにならないので、1km圏人口という読める量で分ける
+    if not tsuffix and ambiguous:
+        tsuffix = f" — {fmt(a1['pop'])} residents within 1 km"
+    title = (f"{name} Station Area Demographics{tsuffix} | Shoken Maker" if tsuffix else
+             f"{name} Station Area Demographics — Population within 500m/1km/3km | Shoken Maker")
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{name} Station Area Demographics — Population within 500m/1km/3km | Shoken Maker</title>
-<meta name="description" content="Residential population around {name} Station, Japan: about {fmt(a1['pop'])} people and {fmt(a1['hh'])} households within 1 km, average age {mean_age}. Free trade-area data from the 2020 Census of Japan.">
+<title>{title}</title>
+<meta name="description" content="Residential population around {name} Station, Japan: about {fmt(a1['pop'])} people and {fmt(a1['hh'])} households within 1 km, average age {mean_age}. {feats[1] if len(feats) > 1 else ''} Free trade-area data from the 2020 Census of Japan.">
 <link rel="canonical" href="{SITE}/en/eki/{en_slug}/">
 {hreflang(slug, en_slug)}
 <style>
@@ -280,9 +315,10 @@ ul{{padding-left:20px}}
 <p>Residential population around {name} Station, aggregated from the 500m grid of the
 2020 Population Census of Japan.{pax}
 Within a 1 km radius there are <strong>about {fmt(a1["pop"])} residents in {fmt(a1["hh"])} households</strong>,
-the average age is {mean_age}, and {senior_pct:.1f}% of residents are 65 or older.</p>
+the average age is {mean_age}, and {senior_pct:.1f}% of residents are 65 or older.{lead}</p>
 <a class="cta" href="{tool}">Explore on the interactive map →</a>
 <p class="muted">The map tool's interface is in Japanese; the circle and numbers work without reading it.</p>
+{feat_block}
 <h2>Trade-area size by radius</h2>
 <table>
 <tr><th>Radius</th><th>Residents</th><th>Households</th><th>Avg. age</th></tr>
@@ -497,11 +533,31 @@ def main() -> None:
     urls = []
     index_items = []
     en_pages = []
+
+    # パス1: 全駅の集計だけ先に済ませる。特徴文は順位・中央値からの乖離＝コーパス全体の
+    # 統計から作るので、1駅ずつ描きながらでは書けない(docs/spec_index_yield_v0.md)
+    built = []
     for i, s in enumerate(targets):
         slug = slugs[idx[id(s)]]
         aggs = {r: aggregate(s["la"], s["lo"], r) for r in RADII}
         if aggs[1000]["pop"] == 0:
             continue
+        built.append((s, slug, aggs))
+        if (i + 1) % 200 == 0:
+            print(f"{i + 1}/{len(targets)} aggregated")
+
+    a1s = {slug: aggs[1000] for _, slug, aggs in built}
+    records = {
+        slug: {"slug": slug, "pop": a["pop"], "hh": a["hh"],
+               "mean_age": a["mean_age"] or 0.0,
+               "senior_pct": band_sum(a["bands"], 13, 19) / a["pop"] * 100 if a["pop"] else 0.0}
+        for slug, a in a1s.items()
+    }
+    stats = corpus_stats(list(records.values()))
+    n_plain = 0
+
+    # パス2: 特徴文を載せて描く
+    for i, (s, slug, aggs) in enumerate(built):
         near = sorted(
             ((t, slugs[idx[id(t)]],
               math.hypot((t["lo"] - s["lo"]) * 111320 * math.cos(math.radians(s["la"])),
@@ -509,13 +565,19 @@ def main() -> None:
              for t in targets if t is not s),
             key=lambda x: x[2],
         )[:5]
+        rec = records[slug]
+        near_recs = [records[nslug] for _, nslug, _ in near if nslug in records]
+        feats = features_ja(rec, stats, near_recs)
+        if not is_distinctive(feats):
+            n_plain += 1
         d = OUT / slug
         d.mkdir(parents=True, exist_ok=True)
         en_slug = EN_SLUGS.get(slug)
         emit(d / "index.html", f"{SITE}/pages/eki/{quote(slug)}/",
-             render(s, slug, aggs, near, en_slug))
+             render(s, slug, aggs, near, en_slug, feats, title_suffix_ja(rec, stats),
+                    used.get(s["n"], 0) > 1))
         if en_slug:
-            en_pages.append((s, slug, en_slug, aggs))
+            en_pages.append((s, slug, en_slug, aggs, near_recs))
         urls.append(f"{SITE}/pages/eki/{slug}/")
         index_items.append(f'<li><a href="{slug}/">{s["n"]}駅</a></li>')
         if (i + 1) % 200 == 0:
@@ -525,16 +587,25 @@ def main() -> None:
     EN_OUT.mkdir(parents=True, exist_ok=True)
     en_index_items = []
     urls_en = []
-    for s, slug, en_slug, aggs in en_pages:
+    # 英語面の同名判定は表示名で行う。日本語名が違っても英語表記が衝突することがある
+    # (札幌/さっぽろ→Sapporo、王子/王子-2→Oji)ので、日本語名の重複だけでは取りこぼす
+    en_dup = {}
+    for _, _, en_slug, _, _ in en_pages:
+        k = en_name(en_slug)
+        en_dup[k] = en_dup.get(k, 0) + 1
+    for s, slug, en_slug, aggs, near_recs in en_pages:
         near_en = sorted(
             ((t_en, math.hypot((t["lo"] - s["lo"]) * 111320 * math.cos(math.radians(s["la"])),
                                (t["la"] - s["la"]) * 110946) / 1000)
-             for t, _, t_en, _ in en_pages if t is not s),
+             for t, _, t_en, _, _ in en_pages if t is not s),
             key=lambda x: x[1])[:5]
         d = EN_OUT / en_slug
         d.mkdir(parents=True, exist_ok=True)
+        rec = records[slug]
         emit(d / "index.html", f"{SITE}/en/eki/{en_slug}/",
-             render_en(s, slug, en_slug, aggs, near_en))
+             render_en(s, slug, en_slug, aggs, near_en,
+                       features_en(rec, stats, near_recs), title_suffix_en(rec, stats),
+                       en_dup.get(en_name(en_slug), 0) > 1))
         urls_en.append(f"{SITE}/en/eki/{en_slug}/")
         en_index_items.append(f'<li><a href="{en_slug}/">{en_name(en_slug)} Station</a></li>')
     emit(EN_OUT / "index.html", f"{SITE}/en/eki/", render_en_index(en_index_items))
@@ -590,6 +661,9 @@ ul{{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fil
             f"Sitemap: {SITE}/sitemap.xml\nSitemap: {SITE}/sitemap.txt\n")
     print(f"done: {len(urls)} ja pages -> {OUT}, {len(urls_en)} en pages -> {EN_OUT}, "
           f"sitemap {len(encoded)} urls")
+    # 順位文しか立たなかった駅の数。docs/spec_index_yield_v0.md の足切り候補はここ
+    print(f"distinctive: {len(urls) - n_plain}/{len(urls)} "
+          f"(順位文のみ={n_plain})")
     if not args.sample:
         # publish-and-ping: デプロイ後に本文が変わったURLだけIndexNowへ通知する
         print("next: cd web && vercel --prod --yes && "
