@@ -9,7 +9,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from distinct import (AGE_DEV_MIN, corpus_stats, features_en, features_ja,  # noqa: E402
-                      hh_size, is_distinctive, rank_phrase, title_suffix_ja)
+                      hh_size, is_distinctive, rank_phrase, title_suffix_ja,
+                      work_ratio)
 
 fails = 0
 
@@ -21,8 +22,10 @@ def check(name: str, cond: bool, detail: str = "") -> None:
         fails += 1
 
 
-def rec(slug, pop, hh, age, senior):
-    return {"slug": slug, "pop": pop, "hh": hh, "mean_age": age, "senior_pct": senior}
+def rec(slug, pop, hh, age, senior, emp=None):
+    # emp 既定は常住人口の0.4倍＝平凡な住宅地。職住比の中央値をここに寄せる
+    return {"slug": slug, "pop": pop, "hh": hh, "mean_age": age, "senior_pct": senior,
+            "emp": int(pop * 0.4) if emp is None else emp}
 
 
 # 分位ルール(上位/下位5%)を踏むには母数が要るので、平凡な98駅＋両端の外れ値2駅で組む。
@@ -35,14 +38,16 @@ PLAIN = [rec(f"p{i:02d}", 90000 - i * 500, (90000 - i * 500) // 2, 45.0,
          for i in range(98)]
 OLD = rec("old", 10000, 5000, 58.0, 46.0)     # 高齢・世帯人員2.00
 YOUNG = rec("young", 1000, 400, 30.0, 2.0)    # 若年・人口最少・世帯人員2.50
-CORPUS = PLAIN + [OLD, YOUNG]
+OFFICE = rec("office", 5000, 3000, 44.0, 21.0, emp=400000)   # 職住分離の極
+BEDTOWN = rec("bed", 40000, 16000, 44.5, 21.5, emp=2000)      # 住宅地型の極
+CORPUS = PLAIN + [OLD, YOUNG, OFFICE, BEDTOWN]
 S = corpus_stats(CORPUS)
 
 # 1. 順位が降順で振られる
-check("人口1位は最大の駅", S["rank_pop"]["p00"] == 1 and S["rank_pop"]["young"] == 100,
+check("人口1位は最大の駅", S["rank_pop"]["p00"] == 1 and S["rank_pop"]["young"] == 102,
       f'p00={S["rank_pop"]["p00"]} young={S["rank_pop"]["young"]}')
 check("65歳以上1位は最も高い駅",
-      S["rank_senior"]["old"] == 1 and S["rank_senior"]["young"] == 100)
+      S["rank_senior"]["old"] == 1 and S["rank_senior"]["young"] == 102)
 
 # 2. 中央値
 check("平均年齢の中央値", abs(S["median_age"] - 45.0) < 1e-9, f'{S["median_age"]}')
@@ -100,12 +105,29 @@ check("人口上位はタイトルに出る", "全国1位" in title_suffix_ja(PL
 # 10. 英語面も同じ計算を共有し、同じ本数の文が立つ
 check("日英で立つ特徴文の本数が一致",
       len(features_ja(OLD, S, near)) == len(features_en(OLD, S, near)))
-check("英語の順位表現", "of 100 stations nationwide" in features_en(PLAIN[0], S, [])[0],
+check("英語の順位表現", "of 102 stations nationwide" in features_en(PLAIN[0], S, [])[0],
       features_en(PLAIN[0], S, [])[0])
 
-# 11. 一意性: 順位が違えば文が分かれる(平凡な駅同士でも順位文で割れる)
+# 11. 職住比(施策3): 昼間人口はメッシュ統計に無いので従業者数で代用している軸
+check("職住比は emp/pop", abs(work_ratio(OFFICE) - 80.0) < 1e-9, f"{work_ratio(OFFICE)}")
+f_off = features_ja(OFFICE, S, [])
+check("職住分離が強い駅に『職住分離』の文が立つ",
+      any("職住分離が強い" in x for x in f_off), " / ".join(f_off))
+f_bed = features_ja(BEDTOWN, S, [])
+check("住宅地型の駅に『住宅地型』の文が立つ",
+      any("住宅地型" in x for x in f_bed), " / ".join(f_bed))
+check("平凡な駅には職住比の文が立たない",
+      not any("職住分離" in x or "住宅地型" in x for x in features_ja(PLAIN[40], S, [])))
+check("emp が無ければ職住比の文は出ない",
+      not any("働く人" in x for x in features_ja(
+          {**PLAIN[40], "emp": 0}, S, [])))
+check("英語面にも職住比が出る",
+      any("work-oriented" in x for x in features_en(OFFICE, S, [])),
+      " / ".join(features_en(OFFICE, S, [])[-1:]))
+
+# 12. 一意性: 順位が違えば文が分かれる(平凡な駅同士でも順位文で割れる)
 sigs = {tuple(features_ja(r, S, [])) for r in CORPUS}
-check("100駅の特徴文セットが互いに一意", len(sigs) == len(CORPUS), f"{len(sigs)}/{len(CORPUS)}")
+check("全駅の特徴文セットが互いに一意", len(sigs) == len(CORPUS), f"{len(sigs)}/{len(CORPUS)}")
 
 print(f"\n{'FAILED' if fails else 'all passed'}: {fails} failure(s)")
 sys.exit(1 if fails else 0)

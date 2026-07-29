@@ -27,6 +27,12 @@ HHSIZE_DEV_MIN = 0.25
 # 人口の多さをタイトルに出す上限順位。母数が小さいコーパスでも
 # 「全国◯位」が安売りにならないよう、分位(EXTREME_Q)との小さい方を採る
 TOP_POP_TITLE = 50
+# 職住比が全国中央値のこの倍率以下なら「住宅地型」と書く
+WORK_LOW_FACTOR = 0.5
+# 「職住分離が強い」は分位を超えるだけでなく中央値のこの倍率以上であることも要る。
+# 分位だけだと、値が同じ駅ばかりの退化した分布で分位＝中央値になり、
+# 平凡な駅まで「職住分離が強い」を名乗ってしまう(テストで踏んだ)
+WORK_HIGH_FACTOR = 1.5
 
 
 def _median(values: list[float]) -> float:
@@ -42,6 +48,16 @@ def hh_size(rec: dict) -> float:
     return rec["pop"] / rec["hh"] if rec.get("hh") else 0.0
 
 
+def work_ratio(rec: dict) -> float:
+    """そこで働く人 ÷ そこに住む人。職住分離の度合い。
+
+    昼間人口ではない(買い物客・通学者・観光客を含まない)。地域メッシュ統計に
+    昼間人口は存在せず、代わりに経済センサスの従業者数を使っている。
+    常住人口だけを見ていると新宿駅の商圏が全国1,334位に見える穴を埋めるための軸。
+    """
+    return rec["emp"] / rec["pop"] if rec.get("emp") and rec.get("pop") else 0.0
+
+
 def corpus_stats(records: list[dict]) -> dict:
     """全駅を1度だけ走査して、順位表と中央値を作る。
 
@@ -52,6 +68,7 @@ def corpus_stats(records: list[dict]) -> dict:
     by_pop = sorted(records, key=lambda r: -r["pop"])
     by_senior = sorted(records, key=lambda r: -r["senior_pct"])
     seniors = sorted(r["senior_pct"] for r in records)
+    works = [work_ratio(r) for r in records if work_ratio(r)]
     return {
         "n": n,
         "rank_pop": {r["slug"]: i + 1 for i, r in enumerate(by_pop)},
@@ -62,6 +79,10 @@ def corpus_stats(records: list[dict]) -> dict:
         # 2位と50位に意味の差がなくなるため(テストで踏んだ)。値で切れば主張が事実に一致する
         "senior_hi": _quantile(seniors, 1 - EXTREME_Q),
         "senior_lo": _quantile(seniors, EXTREME_Q),
+        "median_workratio": _median(works) if works else 0.0,
+        "work_hi": _quantile(sorted(works), 1 - EXTREME_Q) if works else 0.0,
+        "rank_work": {r["slug"]: i + 1 for i, r in enumerate(
+            sorted(records, key=lambda r: -work_ratio(r)))},
     }
 
 
@@ -147,6 +168,20 @@ def features_ja(rec: dict, stats: dict, neighbors: list[dict]) -> list[str]:
             f"1世帯あたりの人員は{hs:.2f}人（全国中央値{med_hs:.2f}人）で、"
             f"{'単身世帯' if hs < med_hs else '家族世帯'}の比重が高い構成です。"
         )
+
+    wr, med_wr = work_ratio(rec), stats["median_workratio"]
+    if wr and med_wr:
+        rw = stats["rank_work"][rec["slug"]]
+        if wr >= max(stats["work_hi"], med_wr * WORK_HIGH_FACTOR):
+            out.append(
+                f"そこで働く人は住む人の{wr:.2f}倍（全国中央値{med_wr:.2f}倍・第{rw:,}位）で、"
+                "職住分離が強い＝昼と夜で人の数が大きく変わる商圏です。"
+            )
+        elif wr <= med_wr * WORK_LOW_FACTOR:
+            out.append(
+                f"そこで働く人は住む人の{wr:.2f}倍（全国中央値{med_wr:.2f}倍）にとどまり、"
+                "勤め先より住まいが多い住宅地型の商圏です。"
+            )
     return out
 
 
@@ -191,6 +226,21 @@ def features_en(rec: dict, stats: dict, neighbors: list[dict]) -> list[str]:
             f"indicating a higher share of {'single-person' if hs < med_hs else 'family'} "
             "households."
         )
+
+    wr, med_wr = work_ratio(rec), stats["median_workratio"]
+    if wr and med_wr:
+        rw = stats["rank_work"][rec["slug"]]
+        if wr >= max(stats["work_hi"], med_wr * WORK_HIGH_FACTOR):
+            out.append(
+                f"There are {wr:.2f} times as many people working here as living here "
+                f"(national median {med_wr:.2f}, rank {rw:,}) — a strongly "
+                "work-oriented area where daytime and nighttime populations differ sharply."
+            )
+        elif wr <= med_wr * WORK_LOW_FACTOR:
+            out.append(
+                f"Only {wr:.2f} times as many people work here as live here "
+                f"(national median {med_wr:.2f}), i.e. a primarily residential area."
+            )
     return out
 
 

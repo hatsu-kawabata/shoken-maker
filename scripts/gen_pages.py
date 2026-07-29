@@ -25,6 +25,8 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "web" / "data"
 OUT = ROOT / "web" / "pages" / "eki"
 EN_OUT = ROOT / "web" / "en" / "eki"
+# 従業者数メッシュ(build_emp.py)。生成にしか使わないので web/ の外＝本番バンドルに載せない
+EMP = ROOT / "data_emp"
 # lastmod台帳: url -> {h: 本文ハッシュ, d: 最終更新日}。本文が変わった日だけ日付を進める
 # (全ページに毎回ビルド日を打つとlastmodが嘘になり、クロール優先度の判断材料として無価値になる)
 MANIFEST = Path(__file__).resolve().parent / "lastmod.json"
@@ -59,6 +61,7 @@ BAND_LABELS = ["0-4", "5-9", "10-14", "15-19", "20-24", "25-29", "30-34", "35-39
 RADII = [500, 1000, 3000]
 
 _mesh_cache: dict[str, list] = {}
+_emp_cache: dict[str, list] = {}
 
 
 def mesh_centroid(code: str) -> tuple[float, float]:
@@ -82,6 +85,44 @@ def load_mesh(code1: str):
             rows = json.loads(f.read_text())
             _mesh_cache[code1] = [(*mesh_centroid(r[0]), r[1:]) for r in rows]
     return _mesh_cache[code1]
+
+
+def load_emp(code1: str):
+    """従業者数メッシュ(build_emp.py の出力)。人口メッシュとは別調査なのでセル集合も別。"""
+    if code1 not in _emp_cache:
+        f = EMP / f"{code1}.json"
+        if not f.exists():
+            _emp_cache[code1] = []
+        else:
+            _emp_cache[code1] = [(*mesh_centroid(c), v)
+                                 for c, v in json.loads(f.read_text()).items()]
+    return _emp_cache[code1]
+
+
+def aggregate_emp(clat: float, clon: float, r: float) -> int:
+    """円内の従業者数。按分は aggregate() と同じ4点サンプリングで揃える。"""
+    margin = 400
+    dlat_r = (r + margin) / 110946
+    dlon_r = (r + margin) / (111320 * math.cos(math.radians(clat)))
+    cells = []
+    for p in range(int((clat - dlat_r) * 1.5), int((clat + dlat_r) * 1.5) + 1):
+        for q in range(int(clon - dlon_r) - 100, int(clon + dlon_r) - 100 + 1):
+            cells += load_emp(f"{p}{q:02d}")
+    kx = 111320 * math.cos(math.radians(clat))
+    ky = 110946
+    r2 = r * r
+    total = 0.0
+    for la, lo, v in cells:
+        inside = 0
+        for sy in (-DLAT / 4, DLAT / 4):
+            for sx in (-DLON / 4, DLON / 4):
+                dx = (lo + sx - clon) * kx
+                dy = (la + sy - clat) * ky
+                if dx * dx + dy * dy <= r2:
+                    inside += 1
+        if inside:
+            total += v * inside / 4
+    return round(total)
 
 
 def aggregate(clat: float, clon: float, r: float) -> dict:
@@ -198,6 +239,9 @@ def render(st, slug: str, aggs: dict, nearby: list, en_slug: str | None = None,
     feat_block = (f'<h2>全国の駅の中での位置づけ</h2>\n<ul>{feat_html}</ul>'
                   if feat_html else "")
     lead = feats[0] if feats else ""
+    emp = a1.get("emp") or 0
+    work_line = (f'この圏内で働く人は約{fmt(emp)}人（常住人口の{emp / a1["pop"]:.2f}倍）です。'
+                 if emp and a1["pop"] else "")
     # タイトル: 特徴が立つ駅は半径の羅列より特徴を出す(同型タイトルの解消)。
     # 同名駅(京橋・大久保・県庁前など)は路線名で区別する。これを入れないと
     # 別の駅のページが完全に同じタイトルになり、重複ページとして扱われる
@@ -230,7 +274,7 @@ ul{{padding-left:20px}}
 <h1>{name}駅の商圏人口・年齢構成</h1>
 <p>{name}駅（{lines}）周辺の常住人口を2020年国勢調査の500mメッシュ統計から集計しました。{pax}
 半径1km圏の人口は<strong>約{fmt(a1["pop"])}人・{fmt(a1["hh"])}世帯</strong>、平均年齢は{mean_age}、
-65歳以上の比率は{senior_pct:.1f}%です。{lead}</p>
+65歳以上の比率は{senior_pct:.1f}%です。{work_line}{lead}</p>
 <a class="cta" href="{tool}">地図で円を動かして詳しく見る →</a>
 {feat_block}
 <h2>半径別の商圏規模</h2>
@@ -282,6 +326,10 @@ def render_en(st, slug: str, en_slug: str, aggs: dict, nearby_en: list,
     feat_block = (f'<h2>How this station compares nationwide</h2>\n<ul>{feat_html}</ul>'
                   if feat_html else "")
     lead = f" {feats[0]}" if feats else ""
+    emp = a1.get("emp") or 0
+    work_line = (f' About {fmt(emp)} people work within the same 1 km radius '
+                 f'({emp / a1["pop"]:.2f}x the resident population).'
+                 if emp and a1["pop"] else "")
     # 同名駅(Okubo・Kyobashi など)の区別。日本語面は路線名で分けるが、英語の読者に
     # 日本語の路線名を出しても手がかりにならないので、1km圏人口という読める量で分ける
     if not tsuffix and ambiguous:
@@ -315,7 +363,7 @@ ul{{padding-left:20px}}
 <p>Residential population around {name} Station, aggregated from the 500m grid of the
 2020 Population Census of Japan.{pax}
 Within a 1 km radius there are <strong>about {fmt(a1["pop"])} residents in {fmt(a1["hh"])} households</strong>,
-the average age is {mean_age}, and {senior_pct:.1f}% of residents are 65 or older.{lead}</p>
+the average age is {mean_age}, and {senior_pct:.1f}% of residents are 65 or older.{work_line}{lead}</p>
 <a class="cta" href="{tool}">Explore on the interactive map →</a>
 <p class="muted">The map tool's interface is in Japanese; the circle and numbers work without reading it.</p>
 {feat_block}
@@ -674,6 +722,8 @@ def main() -> None:
         aggs = {r: aggregate(s["la"], s["lo"], r) for r in RADII}
         if aggs[1000]["pop"] == 0:
             continue
+        # 従業者数は本文が見出しに使う半径1kmだけ集計する(全半径だと生成が倍近く遅くなる)
+        aggs[1000]["emp"] = aggregate_emp(s["la"], s["lo"], 1000)
         built.append((s, slug, aggs))
         if (i + 1) % 200 == 0:
             print(f"{i + 1}/{len(targets)} aggregated")
@@ -682,7 +732,8 @@ def main() -> None:
     records = {
         slug: {"slug": slug, "pop": a["pop"], "hh": a["hh"],
                "mean_age": a["mean_age"] or 0.0,
-               "senior_pct": band_sum(a["bands"], 13, 19) / a["pop"] * 100 if a["pop"] else 0.0}
+               "senior_pct": band_sum(a["bands"], 13, 19) / a["pop"] * 100 if a["pop"] else 0.0,
+               "emp": a.get("emp", 0)}
         for slug, a in a1s.items()
     }
     stats = corpus_stats(list(records.values()))

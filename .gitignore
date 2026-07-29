@@ -2,3 +2,4 @@ raw/
 .DS_Store
 .vercel
 __pycache__/
+data_emp/
